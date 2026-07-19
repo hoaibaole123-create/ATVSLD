@@ -4,7 +4,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Factory Defect Tracker</title>
+    <title>TỒN TẠI, HƯ HỎNG VÀ ĐIỂM KHÔNG PHÙ HỢP</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
     <script>
@@ -20,7 +20,7 @@
               "card-dark": "#1e293b",
             },
             fontFamily: {
-              sans: ["Inter", "sans-serif"],
+  sans: ["Times New Roman", "serif"],
             },
           },
         },
@@ -28,16 +28,27 @@
     </script>
     <style>
       body {
-        font-family: 'Inter', sans-serif;
+        font-family: "Times New Roman", serif;
         -webkit-tap-highlight-color: transparent;
+        background-image: url('https://images.unsplash.com/photo-1553095066-5014bc7b7f2d?auto=format&fit=crop&q=80&w=2000');
+        background-size: cover;
+        background-position: center;
+        background-attachment: fixed;
       }
       .custom-scrollbar::-webkit-scrollbar {
-        width: 4px;
-        height: 4px;
+        width: 8px;
+        height: 8px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-track {
+        background: #e2e8f0;
+        border-radius: 10px;
       }
       .custom-scrollbar::-webkit-scrollbar-thumb {
         background: #cbd5e1;
         border-radius: 10px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: #94a3b8;
       }
       .no-scrollbar::-webkit-scrollbar {
         display: none;
