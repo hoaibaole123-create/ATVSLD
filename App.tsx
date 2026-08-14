@@ -953,7 +953,7 @@ const DefectSummary: React.FC<{ jumpTo?: { sheet: string, row?: number, status?:
   const MAX_COLS = 14; 
   const [isLoading, setIsLoading] = useState(false);
   const [data, setData] = useState<any[]>([]);
-  const [activeSheetName, setActiveSheetName] = useState(jumpTo?.sheet || 'Quản lý hành chính');
+  const [activeSheetName, setActiveSheetName] = useState(jumpTo?.sheet || 'An toàn vệ sinh lao động');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMonth, setSelectedMonth] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState<'all' | 'processed' | 'pending' | 'nvvh'>(jumpTo?.status || 'all');
