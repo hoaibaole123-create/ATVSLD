@@ -83,8 +83,7 @@ const PROCESS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbz6EOtoLlEu
 const EDIT_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwpCbRAAzIKjQhBq96OqYoAHgDaaahzvFkKo2NczHntmkwZOeGnSSFecvg44ZXZUhs/exec';
 
 const CATEGORIES = [
-  'Quản lý hành chính',
-  'Thiết bị công trình',
+  
   'An toàn vệ sinh lao động',
   'TPM, Kaizen'
 ];
@@ -282,7 +281,7 @@ const Dashboard: React.FC<{ isDarkMode: boolean, onActivityClick: (sheet: string
         <img alt="Factory" className="w-full h-full object-cover brightness-[0.25]" src="https://i.ibb.co/zWPTxZvg/123.png" />
         <div className="absolute inset-0 flex flex-col justify-center items-center px-10 text-center bg-gradient-to-b from-blue-900/30 via-transparent to-slate-900/90">
           <h1 className="text-white text-2xl font-black uppercase tracking-tight drop-shadow-2xl mb-2">
-            KIỂM TRA VÀ CẬP NHẬT CÁC HƯ HỎNG, TỒN TẠI VÀ CÁC ĐIỂM KHÔNG PHÙ HỢP
+            KIỂM TRA VÀ CẬP NHẬT CÔNG TÁC AN TOÀN VỆ SINH LAO ĐỘNG
           </h1>
           <div className="flex items-center gap-2 text-blue-200 text-[10px] font-black uppercase tracking-widest bg-white/10 backdrop-blur-md px-5 py-2 rounded-full border border-white/20">
             <ActivityIcon size={14} className="animate-pulse" />
@@ -739,8 +738,7 @@ const DefectForm: React.FC = () => {
           <section><FormLabel required>Họ và tên người phát hiện</FormLabel><input type="text" className="w-full p-2.5 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-[13px] outline-none" required value={formData.reporterName} onChange={(e) => setFormData({...formData, reporterName: e.target.value})} /></section>
           <section><FormLabel required>Phân loại</FormLabel>
             <div className="mt-2 space-y-1">
-              <CustomRadio name="category" value="administrative" label="Quản lý hành chính" checked={formData.category === 'administrative'} onChange={(e) => setFormData({...formData, category: e.target.value})} />
-              <CustomRadio name="category" value="construction-equipment" label="Hư hỏng thiết bị công trình" checked={formData.category === 'construction-equipment'} onChange={(e) => setFormData({...formData, category: e.target.value})} />
+    
               <CustomRadio name="category" value="safety" label="An toàn vệ sinh lao động" checked={formData.category === 'safety'} onChange={(e) => setFormData({...formData, category: e.target.value})} />
               <CustomRadio name="category" value="iso-kaizen" label="ISO, KAIZEN 5S, TPM" checked={formData.category === 'iso-kaizen'} onChange={(e) => setFormData({...formData, category: e.target.value})} />
             </div>
@@ -974,8 +972,7 @@ const DefectSummary: React.FC<{ jumpTo?: { sheet: string, row?: number, status?:
 
   const categories = [
     { name: 'Tất cả', value: 'all' },
-    { name: 'Quản lý hành chính', value: 'Quản lý hành chính' }, 
-    { name: 'Thiết bị công trình', value: 'Thiết bị công trình' }, 
+     
     { name: 'An toàn vệ sinh lao động', value: 'An toàn vệ sinh lao động' }, 
     { name: 'TPM, Kaizen', value: 'TPM, Kaizen' }
   ];
@@ -1485,8 +1482,7 @@ const ProcessingForm: React.FC = () => {
   const [formData, setFormData] = useState({ sheet: '', row: '', tinhTrang: '', ghiChu: '', NVVH: '' });
 
   const categories = [
-    { label: 'Quản lý hành chính', value: 'Quản lý hành chính' },
-    { label: 'Thiết bị công trình', value: 'Thiết bị công trình' },
+    
     { label: 'An toàn vệ sinh lao động', value: 'An toàn vệ sinh lao động' },
     { label: 'TPM, Kaizen', value: 'TPM, Kaizen' }
   ];
