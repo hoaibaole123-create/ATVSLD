@@ -2,12 +2,6 @@ import express from "express";
 import axios from "axios";
 import path from "path";
 import { fileURLToPath } from 'url';
-import dotenv from "dotenv";
-
-// Use override: true so that .env edits in the UI take precedence over stale OS environment variables
-dotenv.config({ override: true });
-
-console.log("[Server Startup] ZALO_WEBHOOK_URL is configured to:", process.env.ZALO_WEBHOOK_URL || "NOT SET");
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -80,89 +74,6 @@ app.get("/api/proxy-image", async (req, res) => {
   } catch (error) {
     console.error("Proxy error:", error);
     res.status(500).send("Failed to fetch image");
-  }
-});
-
-// API Route: Zalo Webhook Notification
-app.post("/api/notify-zalo", async (req, res) => {
-  const webhookUrl = process.env.ZALO_WEBHOOK_URL;
-  console.log(`[Zalo Notification] Endpoint triggered. Process env:`, { 
-    ZALO_WEBHOOK_URL: webhookUrl ? `${webhookUrl.substring(0, 30)}...` : "UNDEFINED" 
-  });
-
-  if (!webhookUrl) {
-    console.log("[Zalo Notification] ZALO_WEBHOOK_URL is not configured. Zalo notification skipped.");
-    return res.json({ success: true, message: "Zalo webhook not configured, skipped notification." });
-  }
-
-  const { type, data } = req.body;
-  let message = "";
-
-  const now = new Date().toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
-
-  if (type === "new_defect") {
-    message = `[BÁO CÁO MỚI - HOẠT ĐỘNG MỚI NHẤT]
- Có báo cáo hư hỏng/tồn tại mới!
- Người phát hiện: ${data.reporterName || "N/A"}
-Khu vực: ${data.area || "N/A"}
-Thiết bị: ${data.equipmentName || "N/A"}
-Vị trí: ${data.location || "N/A"}
-Chi tiết: ${data.description || "N/A"}
-Thời gian: ${now}`;
-  } else if (type === "defect_processed") {
-    message = `[CẬP NHẬT TRẠNG THÁI - HOẠT ĐỘNG MỚI NHẤT]
-Đã cập nhật xử lý cho tồn tại!
-Dòng số: ${data.row || "N/A"}
-NVVH xử lý: ${data.NVVH || "N/A"}
-Tình trạng: ${data.tinhTrang || "N/A"}
-Ghi chú: ${data.ghiChu || "N/A"}
-Thời gian: ${now}`;
-  } else if (type === "defect_edited") {
-    message = `[SỬA ĐỔI DỮ LIỆU - HOẠT ĐỘNG MỚI NHẤT]
-Một dòng dữ liệu đã được chỉnh sửa!
- Bộ phận: ${data.sheet || "N/A"}
-Dòng số: ${data.row || "N/A"}
-Thời gian: ${now}`;
-  } else {
-    message = `[CÓ HOẠT ĐỘNG MỚI]
-Có thay đổi về hoạt động trên ứng dụng!
- Thời gian: ${now}`;
-  }
-
-  const payload = {
-    message: message,
-    text: message,
-    type: type,
-    timestamp: now,
-    data: data
-  };
-
-  console.log(`[Zalo Notification] Sending POST to: ${webhookUrl}`);
-  console.log(`[Zalo Notification] Payload:`, JSON.stringify(payload, null, 2));
-
-  try {
-    const response = await axios.post(webhookUrl, payload, {
-      headers: { 'Content-Type': 'application/json' },
-      timeout: 10000
-    });
-
-    console.log("[Zalo Notification] Sent successfully. Target status:", response.status);
-    console.log("[Zalo Notification] Target response data:", response.data);
-    return res.json({ success: true, status: response.status, targetResponse: response.data });
-  } catch (error: any) {
-    console.error("[Zalo Notification] Error occurred sending request.");
-    console.error("[Zalo Notification] Error message:", error.message);
-    if (error.response) {
-      console.error("[Zalo Notification] Target status:", error.response.status);
-      console.error("[Zalo Notification] Target headers:", error.response.headers);
-      console.error("[Zalo Notification] Target data:", error.response.data);
-    }
-    return res.status(500).json({ 
-      error: "Failed to send notification", 
-      details: error.message,
-      targetError: error.response?.data,
-      targetStatus: error.response?.status
-    });
   }
 });
 

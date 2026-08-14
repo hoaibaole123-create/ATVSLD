@@ -710,25 +710,6 @@ const DefectForm: React.FC = () => {
         body: JSON.stringify(payload)
       });
       
-      // Gửi thông báo Zalo qua Webhook
-      fetch('/api/notify-zalo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'new_defect',
-          data: formData
-        })
-      })
-      .then(async (res) => {
-        const resData = await res.json();
-        if (res.ok) {
-          console.log("[Zalo Notify] Successfully triggered webhook for new report:", resData);
-        } else {
-          console.error("[Zalo Notify] Failed to trigger webhook:", resData);
-        }
-      })
-      .catch(err => console.error("[Zalo Notify] Network error sending notification:", err));
-      
       setIsSubmitting(false);
       setShowSuccess(true);
       setTimeout(() => {
@@ -905,25 +886,6 @@ const EditModal: React.FC<EditModalProps> = ({ sheet, row, headers, rowData, onC
         console.error("EditModal Proxy error:", errorData);
         throw new Error(errorData.details || "Lỗi server proxy (Edit)");
       }
-
-      // Gửi thông báo Zalo qua Webhook
-      fetch('/api/notify-zalo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'defect_edited',
-          data: { sheet, row }
-        })
-      })
-      .then(async (res) => {
-        const resData = await res.json();
-        if (res.ok) {
-          console.log("[Zalo Notify] Successfully triggered webhook for edit:", resData);
-        } else {
-          console.error("[Zalo Notify] Failed to trigger webhook for edit:", resData);
-        }
-      })
-      .catch(err => console.error("[Zalo Notify] Network error sending notification:", err));
 
       const resultText = await response.text();
       console.log("Update result raw:", resultText);
@@ -1577,31 +1539,6 @@ const ProcessingForm: React.FC = () => {
         console.error("ProcessingForm Proxy error:", errorData);
         throw new Error(errorData.details || "Lỗi server proxy (Processing)");
       }
-
-      // Gửi thông báo Zalo qua Webhook
-      fetch('/api/notify-zalo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'defect_processed',
-          data: {
-            sheet: formData.sheet,
-            row: formData.row,
-            tinhTrang: formData.tinhTrang,
-            ghiChu: formData.ghiChu,
-            NVVH: formData.NVVH
-          }
-        })
-      })
-      .then(async (res) => {
-        const resData = await res.json();
-        if (res.ok) {
-          console.log("[Zalo Notify] Successfully triggered webhook for process:", resData);
-        } else {
-          console.error("[Zalo Notify] Failed to trigger webhook for process:", resData);
-        }
-      })
-      .catch(err => console.error("[Zalo Notify] Network error sending notification:", err));
 
       setShowSuccess1(true);
       setFormData({ sheet: '', row: '', tinhTrang: '', ghiChu: '', NVVH: '' });
