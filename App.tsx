@@ -984,7 +984,11 @@ const DefectSummary: React.FC<{ jumpTo?: { sheet: string, row?: number, status?:
     
     try {
       if (activeSheetName === 'all') {
-        const promises = CATEGORIES.map(async (cat) => {
+        const sheetsForAll = [
+    'An toàn vệ sinh lao động',
+    'TPM, Kaizen'
+  ];
+        const promises = sheetsForAll.map(async (sheetName) => {
           const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(cat)}&t=${Date.now()}`;
           const response = await fetch(url);
           const text = await response.text();
