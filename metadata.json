@@ -1,5 +1,8 @@
 {
   "name": "Factory Defect Tracker",
   "description": "A comprehensive mobile dashboard for monitoring factory defects, equipment maintenance, and operational non-compliances with real-time analytics and activity logging.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
