@@ -851,9 +851,7 @@ const Dashboard: React.FC<{ isDarkMode: boolean, onActivityClick: (sheet: string
                     </span>
                   )}
                 </div>
-                <p className="text-[13px] text-slate-500 dark:text-slate-400 mt-1 font-medium">
-                  Hệ thống tự động rà soát & phân bổ tồn tại theo cao trình trách nhiệm bảo trì tự quản TPM (cảnh báo vàng cho các mục đang/chưa hoàn thành)
-                </p>
+              
               </div>
             </div>
 
@@ -1296,17 +1294,7 @@ const Dashboard: React.FC<{ isDarkMode: boolean, onActivityClick: (sheet: string
                 </table>
               </div>
 
-              <div className="bg-blue-50 dark:bg-blue-950/40 p-4 rounded-xl border border-blue-200 dark:border-blue-800/60 text-xs text-slate-600 dark:text-slate-300">
-                <p className="font-bold text-blue-800 dark:text-blue-300 mb-1 flex items-center gap-1.5">
-                  <Info size={14} /> Ghi chú phân giao:
-                </p>
-                <p className="leading-relaxed mb-1">
-                  Khi phát hiện tồn tại/khiếm khuyết tại bất kỳ cao trình nào thuộc <strong>NMTĐ Ialy Mở Rộng</strong>, hệ thống sẽ tự động đối chiếu bảng phân giao trên để phát cảnh báo và nhắc nhở Kíp trực tương ứng trên Trang tổng quan.
-                </p>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 italic">
-                  * Lưu ý: Hiện tại chức năng cảnh báo phân giao Kíp chỉ áp dụng cho NMTĐ Ialy Mở Rộng. Các khu vực như Ialy hiện hữu, Cửa nhận nước & Đập tràn sẽ được tích hợp bổ sung sau khi có bảng phân công chi tiết.
-                </p>
-              </div>
+            
             </div>
 
             <div className="p-5 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 flex justify-end">
@@ -1681,7 +1669,7 @@ const DefectForm: React.FC = () => {
             category: data.category || prev.category,
             area: data.area || prev.area,
             equipmentName: data.equipmentName || prev.equipmentName,
-            location: data.location || prev.location,
+            // Không gợi ý/điền vào ô địa điểm (để người dùng tự chọn/nhập địa điểm)
             description: data.description || prev.description,
           }));
         }}
