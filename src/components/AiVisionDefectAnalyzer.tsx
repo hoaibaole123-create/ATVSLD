@@ -224,10 +224,9 @@ export const AiVisionDefectAnalyzer: React.FC<AiVisionDefectAnalyzerProps> = ({
         category: analysisResult.category,
         area: analysisResult.suggestedArea,
         equipmentName: analysisResult.equipmentName,
-        location: analysisResult.suggestedLocation,
         description: chosenDescription,
       });
-      setAppliedNotification("Đã tự động điền tất cả gợi ý vào biểu mẫu!");
+      setAppliedNotification("Đã áp dụng gợi ý (Phân loại, Thiết bị, Mô tả) vào biểu mẫu!");
       setTimeout(() => {
         setAppliedNotification(null);
         onClose();
@@ -610,14 +609,6 @@ export const AiVisionDefectAnalyzer: React.FC<AiVisionDefectAnalyzerProps> = ({
                           {analysisResult.equipmentName}
                         </span>
                       </div>
-                      {analysisResult.suggestedLocation && (
-                        <div className="flex items-center gap-2 col-span-1 sm:col-span-2">
-                          <span className="text-slate-400 font-bold uppercase text-[10px]">Vị trí:</span>
-                          <span className="font-semibold text-slate-700 dark:text-slate-200">
-                            {analysisResult.suggestedLocation}
-                          </span>
-                        </div>
-                      )}
                     </div>
 
                     {/* Observations list */}
