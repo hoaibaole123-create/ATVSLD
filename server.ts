@@ -3,6 +3,7 @@ import axios from "axios";
 import path from "path";
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, Type } from "@google/genai";
+import { buildLearningContext } from "./api/_learningContext";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -57,7 +58,7 @@ async function generateWithFallback(ai: GoogleGenAI, generateParams: any) {
 
 // API Route: AI Image Evaluation & Description Suggestions
 app.post("/api/analyze-defect-image", async (req, res) => {
-  const { imageBase64, mimeType = "image/jpeg", formType = "report", pendingDefects = [] } = req.body;
+  const { imageBase64, mimeType = "image/jpeg", formType = "report", pendingDefects = [], lessons = [], sheetExamples = [] } = req.body;
   if (!imageBase64) {
     return res.status(400).json({ error: "Dữ liệu hình ảnh không được để trống" });
   }
@@ -78,7 +79,7 @@ app.post("/api/analyze-defect-image", async (req, res) => {
         `\n\nNhiệm vụ khớp tồn tại: Hãy đối chiếu hình ảnh với danh sách tồn tại trên. Nhận diện xem ảnh này khớp nhất với tồn tại nào (chỉ rõ sheet, row, tên thiết bị, nội dung, độ tin cậy "high"|"medium"|"low", và lý do nhận diện cụ thể). Nếu không có mục nào khớp thì matchedDefect có thể để trống hoặc confidence là "low".`;
     }
 
-    const prompt = isProcessing
+    const basePrompt = isProcessing
       ? `Bạn là chuyên gia thẩm định kỹ thuật, an toàn vệ sinh lao động (ATVSLĐ) và 5S/TPM tại nhà máy công nghiệp / thủy điện Ialy.
 Hãy phân tích nhanh hình ảnh minh chứng kết quả xử lý / khắc phục tồn tại này.
 1. Tự động nhận diện và đối chiếu xem ảnh này thuộc về tồn tại nào đã lưu trong danh sách tồn tại đang chờ xử lý.
@@ -112,6 +113,9 @@ QUY TẮC PHÂN LOẠI:
    - hasDefect = false
    - severity = "Bình thường"
    - defectTitle = "Hiện trường & Thiết bị đạt chuẩn an toàn"`;
+
+    // Học theo ngữ cảnh: ví dụ mẫu từ Google Sheet + sổ tay các ca người dùng đã sửa
+    const prompt = basePrompt + buildLearningContext({ lessons, sheetExamples });
 
     const response = await generateWithFallback(ai, {
       contents: [

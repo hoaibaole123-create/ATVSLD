@@ -75,6 +75,7 @@ import {
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { AiVisionDefectAnalyzer } from './src/components/AiVisionDefectAnalyzer';
+import { recordLesson } from './src/lib/aiKnowledgeBase';
 
 // --- Consolidated Types ---
 export enum DefectStatus {
@@ -1322,6 +1323,8 @@ const DefectForm: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [locationSearch, setLocationSearch] = useState('');
+  // Lưu gợi ý gốc của AI để đối chiếu với chỉnh sửa của người dùng (Học theo ngữ cảnh)
+  const aiSuggestionRef = useRef<Record<string, string> | null>(null);
 
   const [formData, setFormData] = useState({
     reporterName: '',
@@ -1370,6 +1373,20 @@ const DefectForm: React.FC = () => {
       return;
     }
 
+    // Ghi nhận bài học kinh nghiệm nếu người dùng đã sửa lại gợi ý của AI
+    if (aiSuggestionRef.current) {
+      recordLesson({
+        formType: 'report',
+        aiSuggestion: aiSuggestionRef.current,
+        userCorrection: {
+          category: formData.category,
+          area: formData.area,
+          equipmentName: formData.equipmentName,
+          description: formData.description,
+        },
+      });
+    }
+
     setIsSubmitting(true);
     try {
       const filesPayload = await Promise.all(images.map(img => {
@@ -1397,6 +1414,7 @@ const DefectForm: React.FC = () => {
         setShowSuccess(false);
         setFormData({ reporterName: '', category: '', area: '', equipmentName: '', location: '', description: '' });
         setImages([]);
+        aiSuggestionRef.current = null;
       }, 3000);
 
     } catch (err) {
@@ -1663,6 +1681,16 @@ const DefectForm: React.FC = () => {
         onClose={() => setShowAiModal(false)}
         images={images}
         formType="report"
+        learnFromSheetId={SHEET_ID}
+        learnFromSheetNames={CATEGORIES}
+        onAnalyzed={(result) => {
+          aiSuggestionRef.current = {
+            category: result.category || '',
+            area: result.suggestedArea || '',
+            equipmentName: result.equipmentName || '',
+            description: result.descriptions?.standard || '',
+          };
+        }}
         onApplyAllReport={(data) => {
           setFormData(prev => ({
             ...prev,
@@ -1672,9 +1700,13 @@ const DefectForm: React.FC = () => {
             // Không gợi ý/điền vào ô địa điểm (để người dùng tự chọn/nhập địa điểm)
             description: data.description || prev.description,
           }));
+          if (aiSuggestionRef.current && data.description) {
+            aiSuggestionRef.current.description = data.description;
+          }
         }}
         onApplyDescription={(desc) => {
           setFormData(prev => ({ ...prev, description: desc }));
+          if (aiSuggestionRef.current) aiSuggestionRef.current.description = desc;
         }}
       />
     </div>
@@ -2399,6 +2431,8 @@ const ProcessingForm: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [formData, setFormData] = useState({ sheet: '', row: '', tinhTrang: '', ghiChu: '', NVVH: '' });
+  // Gợi ý gốc của AI cho biểu mẫu xử lý, dùng để rút bài học kinh nghiệm khi người dùng sửa lại
+  const aiProcessSuggestionRef = useRef<Record<string, string> | null>(null);
 
   const categories = [
     { label: 'An toàn vệ sinh lao động', value: 'An toàn vệ sinh lao động' },
@@ -2468,6 +2502,21 @@ const ProcessingForm: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.sheet || !formData.row) return alert("Vui lòng chọn đầy đủ thông tin!");
+
+    // Ghi nhận bài học kinh nghiệm nếu người dùng đã sửa lại gợi ý của AI
+    if (aiProcessSuggestionRef.current) {
+      recordLesson({
+        formType: 'process',
+        aiSuggestion: aiProcessSuggestionRef.current,
+        userCorrection: {
+          tinhTrang: formData.tinhTrang,
+          ghiChu: formData.ghiChu,
+          matchedSheet: formData.sheet,
+          matchedRow: String(formData.row || ''),
+        },
+      });
+    }
+
     setIsSubmitting(true);
     try {
       const filesPayload = await Promise.all(images.map(img => {
@@ -2497,6 +2546,7 @@ const ProcessingForm: React.FC = () => {
 
       setShowSuccess1(true);
       setFormData({ sheet: '', row: '', tinhTrang: '', ghiChu: '', NVVH: '' });
+      aiProcessSuggestionRef.current = null;
       setImages([]);
       setDefectList([]);
       setMatchedItemInfo(null);
@@ -2663,7 +2713,17 @@ if (showSuccess1) {
         onClose={() => setShowAiModal(false)}
         images={images}
         formType="process"
+        learnFromSheetId={SHEET_ID}
+        learnFromSheetNames={CATEGORIES}
         pendingDefects={allPendingDefects.length > 0 ? allPendingDefects : defectList}
+        onAnalyzed={(result) => {
+          aiProcessSuggestionRef.current = {
+            tinhTrang: result.processStatus || '',
+            ghiChu: result.processNote || result.descriptions?.concise || '',
+            matchedSheet: result.matchedDefect?.sheet || '',
+            matchedRow: result.matchedDefect?.row != null ? String(result.matchedDefect.row) : '',
+          };
+        }}
         onApplyProcess={(data) => {
           if (data.sheet) {
             setFormData(prev => ({

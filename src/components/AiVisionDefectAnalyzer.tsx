@@ -14,8 +14,16 @@ import {
   CheckCircle2, 
   Camera, 
   Lightbulb,
-  Bot
+  Bot,
+  BookOpen,
+  Trash2
 } from 'lucide-react';
+import { buildLessonPayload, countLessons, clearLessons } from '../lib/aiKnowledgeBase';
+import {
+  refreshSheetExamples,
+  getCachedSheetExamples,
+  serializeSheetExamplesForApi,
+} from '../lib/sheetKnowledge';
 
 export interface AiVisionAnalysisResult {
   hasDefect?: boolean;
@@ -78,6 +86,12 @@ interface AiVisionDefectAnalyzerProps {
     ghiChu?: string;
     matchedDefect?: any;
   }) => void;
+  /** Trả kết quả AI thô về form cha để đối chiếu với chỉnh sửa của người dùng (Học theo ngữ cảnh) */
+  onAnalyzed?: (result: AiVisionAnalysisResult) => void;
+  /** ID Google Sheet để AI tự động học văn phong từ các tồn tại đã có trên Sổ theo dõi */
+  learnFromSheetId?: string;
+  /** Danh sách sheet dùng làm nguồn ví dụ mẫu */
+  learnFromSheetNames?: string[];
 }
 
 // Fast client-side image downscaling to speed up upload & AI vision processing (sub-second speeds)
@@ -127,6 +141,9 @@ export const AiVisionDefectAnalyzer: React.FC<AiVisionDefectAnalyzerProps> = ({
   formType = 'report',
   pendingDefects = [],
   onApplyProcess,
+  onAnalyzed,
+  learnFromSheetId,
+  learnFromSheetNames = ['An toàn vệ sinh lao động', 'TPM, Kaizen'],
 }) => {
   const [selectedImageIdx, setSelectedImageIdx] = useState<number>(0);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
@@ -137,6 +154,25 @@ export const AiVisionDefectAnalyzer: React.FC<AiVisionDefectAnalyzerProps> = ({
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [appliedNotification, setAppliedNotification] = useState<string | null>(null);
   const scannedImagesRef = React.useRef<{ [key: string]: AiVisionAnalysisResult }>({});
+  const [lessonCount, setLessonCount] = useState<number>(0);
+  const [sheetExampleCount, setSheetExampleCount] = useState<number>(0);
+  const [isSyncingSheet, setIsSyncingSheet] = useState<boolean>(false);
+
+  // Đếm số bài học trong Sổ tay kinh nghiệm mỗi khi mở modal
+  React.useEffect(() => {
+    if (isOpen) setLessonCount(countLessons());
+  }, [isOpen]);
+
+  // Tự động học từ Google Sheet: nạp sẵn ví dụ mẫu ngay khi biểu mẫu được mở
+  // (chạy lúc mount, không chờ mở modal, để lần quét ảnh đầu tiên đã có mẫu tham chiếu).
+  // Dùng cache localStorage, chỉ tải lại khi hết hạn 6 giờ.
+  React.useEffect(() => {
+    setSheetExampleCount(getCachedSheetExamples().length);
+    if (!learnFromSheetId) return;
+    refreshSheetExamples(learnFromSheetId, learnFromSheetNames)
+      .then((examples) => setSheetExampleCount(examples.length))
+      .catch(() => { /* im lặng: thiếu ví dụ mẫu vẫn quét được bình thường */ });
+  }, [learnFromSheetId]);
 
   // Auto scan when modal opens or when selected image changes
   React.useEffect(() => {
@@ -146,6 +182,7 @@ export const AiVisionDefectAnalyzer: React.FC<AiVisionDefectAnalyzerProps> = ({
       if (scannedImagesRef.current[fileKey]) {
         const cached = scannedImagesRef.current[fileKey];
         setAnalysisResult(cached);
+        onAnalyzed?.(cached);
         if (cached.matchedDefect) {
           setSelectedMatchedItem(cached.matchedDefect);
         }
@@ -179,6 +216,10 @@ export const AiVisionDefectAnalyzer: React.FC<AiVisionDefectAnalyzerProps> = ({
           mimeType: mimeType,
           formType: formType,
           pendingDefects: pendingDefects && pendingDefects.length > 0 ? pendingDefects : undefined,
+          // Sổ tay kinh nghiệm thực tế - các ca người dùng đã sửa chuẩn trước đó
+          lessons: buildLessonPayload(formType === 'process' ? 'process' : 'report'),
+          // Ví dụ mẫu tự động học từ các tồn tại đã có trên Google Sheet
+          sheetExamples: serializeSheetExamplesForApi(getCachedSheetExamples()),
         }),
       });
 
@@ -190,6 +231,7 @@ export const AiVisionDefectAnalyzer: React.FC<AiVisionDefectAnalyzerProps> = ({
       const fileKey = targetFile ? `${targetFile.name}_${targetFile.size}_${imgIndex}` : `${imgIndex}`;
       scannedImagesRef.current[fileKey] = data.analysis;
       setAnalysisResult(data.analysis);
+      onAnalyzed?.(data.analysis);
       if (data.analysis?.matchedDefect) {
         setSelectedMatchedItem(data.analysis.matchedDefect);
       }
@@ -224,6 +266,7 @@ export const AiVisionDefectAnalyzer: React.FC<AiVisionDefectAnalyzerProps> = ({
         category: analysisResult.category,
         area: analysisResult.suggestedArea,
         equipmentName: analysisResult.equipmentName,
+        location: analysisResult.suggestedLocation,
         description: chosenDescription,
       });
       setAppliedNotification("Đã áp dụng gợi ý (Phân loại, Thiết bị, Mô tả) vào biểu mẫu!");
@@ -269,12 +312,60 @@ export const AiVisionDefectAnalyzer: React.FC<AiVisionDefectAnalyzerProps> = ({
               </p>
             </div>
           </div>
-          <button 
-            onClick={onClose}
-            className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-full transition-colors"
-          >
-            <X size={20} />
-          </button>
+          <div className="flex items-center gap-1.5">
+            {learnFromSheetId && (
+              <button
+                type="button"
+                disabled={isSyncingSheet}
+                onClick={async () => {
+                  setIsSyncingSheet(true);
+                  try {
+                    const examples = await refreshSheetExamples(learnFromSheetId, learnFromSheetNames, true);
+                    setSheetExampleCount(examples.length);
+                  } finally {
+                    setIsSyncingSheet(false);
+                  }
+                }}
+                className="hidden md:flex items-center gap-1.5 px-2.5 py-1 bg-white/15 hover:bg-white/25 backdrop-blur-md rounded-full text-[11px] font-bold transition-colors disabled:opacity-60"
+                title="AI đang tham chiếu văn phong từ các tồn tại đã có trên Google Sheet. Bấm để học lại ngay."
+              >
+                {isSyncingSheet ? (
+                  <Loader2 size={13} className="animate-spin text-emerald-300" />
+                ) : (
+                  <Layers size={13} className="text-emerald-300" />
+                )}
+                <span>Sheet: {sheetExampleCount} mẫu</span>
+              </button>
+            )}
+            {lessonCount > 0 && (
+              <div
+                className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 bg-white/15 backdrop-blur-md rounded-full text-[11px] font-bold"
+                title="Sổ tay kinh nghiệm: AI đang học từ các ca bạn đã chỉnh sửa chuẩn trước đó"
+              >
+                <BookOpen size={13} className="text-amber-300" />
+                <span>Đã học {lessonCount} ca</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm('Xóa toàn bộ Sổ tay kinh nghiệm đã học? AI sẽ quay lại đánh giá mặc định.')) {
+                      clearLessons();
+                      setLessonCount(0);
+                    }
+                  }}
+                  className="ml-0.5 text-white/70 hover:text-red-200 transition-colors"
+                  title="Xóa sổ tay kinh nghiệm"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            )}
+            <button 
+              onClick={onClose}
+              className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-full transition-colors"
+            >
+              <X size={20} />
+            </button>
+          </div>
         </div>
 
         {/* Applied Notification Banner */}
@@ -609,6 +700,14 @@ export const AiVisionDefectAnalyzer: React.FC<AiVisionDefectAnalyzerProps> = ({
                           {analysisResult.equipmentName}
                         </span>
                       </div>
+                      {analysisResult.suggestedLocation && (
+                        <div className="flex items-center gap-2 col-span-1 sm:col-span-2">
+                          <span className="text-slate-400 font-bold uppercase text-[10px]">Vị trí:</span>
+                          <span className="font-semibold text-slate-700 dark:text-slate-200">
+                            {analysisResult.suggestedLocation}
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Observations list */}

@@ -1,4 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
+import { buildLearningContext } from "./_learningContext";
 
 let aiClient: GoogleGenAI | null = null;
 function getGenAI(): GoogleGenAI {
@@ -64,7 +65,7 @@ export default async function handler(req: any, res: any) {
 
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-    const { imageBase64, mimeType = "image/jpeg", formType = "report", pendingDefects = [] } = body || {};
+    const { imageBase64, mimeType = "image/jpeg", formType = "report", pendingDefects = [], lessons = [], sheetExamples = [] } = body || {};
 
     if (!imageBase64) {
       return res.status(400).json({ error: "Dữ liệu hình ảnh không được để trống" });
@@ -83,7 +84,7 @@ export default async function handler(req: any, res: any) {
         `\n\nNhiệm vụ khớp tồn tại: Hãy đối chiếu hình ảnh với danh sách tồn tại trên. Nhận diện xem ảnh này khớp nhất với tồn tại nào (chỉ rõ sheet, row, tên thiết bị, nội dung, độ tin cậy "high"|"medium"|"low", và lý do nhận diện cụ thể). Nếu không có mục nào khớp thì matchedDefect có thể để trống hoặc confidence là "low".`;
     }
 
-    const prompt = isProcessing
+    const basePrompt = isProcessing
       ? `Bạn là chuyên gia thẩm định kỹ thuật, an toàn vệ sinh lao động (ATVSLĐ) và 5S/TPM tại nhà máy công nghiệp / thủy điện Ialy.
 Hãy phân tích nhanh hình ảnh minh chứng kết quả xử lý / khắc phục tồn tại này.
 1. Tự động nhận diện và đối chiếu xem ảnh này thuộc về tồn tại nào đã lưu trong danh sách tồn tại đang chờ xử lý.
@@ -131,6 +132,9 @@ QUY TẮC PHÂN LOẠI & ĐÁNH GIÁ:
    -> severity = "Bình thường"
    -> defectTitle = "Hiện trường & Thiết bị đạt chuẩn an toàn – 5S"
    LƯU Ý QUAN TRỌNG: Chỉ chọn mục này khi sàn nhà và bề mặt thiết bị THỰC SỰ SẠCH SẼ. Nếu nhìn thấy sàn có vết ố, bụi, rác hay vết bẩn, BẮT BUỘC PHẢI BÁO hasDefect = true với phân loại tương ứng.`;
+
+    // Học theo ngữ cảnh: ví dụ mẫu từ Google Sheet + sổ tay các ca người dùng đã sửa
+    const prompt = basePrompt + buildLearningContext({ lessons, sheetExamples });
 
     const response = await generateWithFallback(ai, {
       contents: [
