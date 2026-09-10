@@ -192,26 +192,40 @@ Hãy quan sát kỹ toàn bộ bức ảnh (bao gồm cả con người, hành v
 - VI PHẠM BHLĐ KHÁC: Không đeo găng tay khi thao tác điện/nhiệt/hóa chất, không đeo dây an toàn trên cao, không mặc áo phản quang/quần áo bảo hộ đúng quy chuẩn.
 - CÁC NGUY CƠ AN TOÀN KHÁC: Hở điện, vật cản lối thoát hiểm, sàn trơn trượt, nguy cơ vật rơi, thiếu rào chắn/biển báo.
 
-QUY TẮC PHÂN LOẠI:
-1. NẾU CÓ BẤT KỲ VI PHẠM BHLĐ NÀO (như không đội mũ, không mang giày bảo hộ...) hoặc rủi ro tai nạn/điện giật/chấn thương:
-   - hasDefect = true
-   - category = "safety" (An toàn vệ sinh lao động)
-   - categoryLabel = "An toàn vệ sinh lao động"
-   - defectTitle = Nêu rõ vi phạm (ví dụ: "Vi phạm BHLĐ: Không đội mũ bảo hộ và không mang giày bảo hộ trong khu vực vận hành")
-   - equipmentName = Tên khu vực/thiết bị (ví dụ: "Trang bị BHLĐ cá nhân / Phòng điều khiển trung tâm")
-   - severity = "Cao" hoặc "Khẩn cấp" hoặc "Trung bình"
-   - observations = Liệt kê chi tiết quan sát (ví dụ: "Nhân viên không đội mũ bảo hộ (mũ đặt trên nóc tủ thiết bị)", "Nhân viên chỉ đi tất/dép, không mang giày bảo hộ lao động đúng quy định")
-   - descriptions: 3 phương án mô tả rõ lỗi vi phạm và quy định an toàn
-   - remedySuggestion = Yêu cầu chấn chỉnh ngay: bắt buộc trang bị đầy đủ mũ và giày bảo hộ trước khi vào khu vực làm việc.
+QUY TẮC PHÂN LOẠI & ĐÁNH GIÁ:
+1. KIỂM TRA VI PHẠM AN TOÀN VỆ SINH LAO ĐỘNG (ATVSLĐ & BHLĐ/PPE):
+   - Không đội mũ bảo hộ, mũ để sai chỗ.
+   - Không mang giày bảo hộ, đi chân đất, chỉ đi tất, đi dép lê/dép tổ ong hoặc giày thể thao/giày vải không đạt chuẩn BHLĐ trong khu vực sản xuất/vận hành.
+   - Sàn có vết dầu mỡ/nước đọng gây NGUY CƠ TRƠN TRƯỢT NGÃ, hở điện, vật cản lối thoát hiểm.
+   -> hasDefect = true
+   -> category = "safety" (An toàn vệ sinh lao động)
+   -> categoryLabel = "An toàn vệ sinh lao động"
+   -> defectTitle: Nêu rõ vi phạm (ví dụ: "Nguy cơ trượt ngã do dầu loang trên sàn" hoặc "Vi phạm BHLĐ: Không mang giày bảo hộ")
+   -> severity = "Trung bình" | "Cao" | "Khẩn cấp"
 
-2. NẾU LỖI 5S / TPM / CƠ KHÍ (không nguy hiểm tính mạng: rò rỉ dầu mỡ, đồ đạc bừa bãi, rỉ sét vỏ máy...):
-   - hasDefect = true
-   - category = "iso-kaizen" (ISO, KAIZEN 5S, TPM)
+2. KIỂM TRA VỆ SINH CÔNG NGHIỆP, 5S, TPM & SÀN BẨN (SEISO - SẠCH SẼ):
+   - SÀN BẨN / DƠ BỤI: Sàn nhà có vết bẩn, bùn đất, vết ố, bụi bám dày trên sàn/tủ điện/thiết bị/đường ống, mạng nhện, vết dầu bám khô, vệt chân in bẩn.
+   - RÁC & BỪA BÃI: Giẻ lau bẩn vứt bừa bãi, vật tư, dụng cụ để lẫn lộn không cất về vị trí quy định, vạch kẻ phân làn bị mờ hoặc bẩn.
+   - GỈ SÉT & XUỐNG CẤP: Thiết bị gỉ sét, sơn bong tróc, ẩm mốc.
+   -> hasDefect = true
+   -> category = "iso-kaizen" (ISO, KAIZEN 5S, TPM)
+   -> categoryLabel = "ISO, KAIZEN 5S, TPM"
+   -> defectTitle: Nêu rõ hiện trạng (ví dụ: "Sàn khu vực làm việc dơ bẩn, bám bụi và vết ố chưa được vệ sinh")
+   -> equipmentName: Tên khu vực/mặt sàn/thiết bị bị bẩn (ví dụ: "Sàn khu vực tổ máy / Phòng điều khiển / Tủ điện")
+   -> severity:
+      * "Thấp": Bụi mỏng rải rác, vết dơ nhỏ, không ảnh hưởng vận hành.
+      * "Trung bình": Sàn bẩn rõ rệt, bám bụi nhiều hoặc có vết dầu khô chiếm 10-30% diện tích quan sát.
+      * "Cao": Sàn rất bẩn, dầu loang rộng hoặc bụi dày trên thiết bị điện gây nguy cơ quá nhiệt.
+   -> observations: Mô tả chi tiết các điểm bẩn, vị trí cụ thể trên sàn hoặc thiết bị.
+   -> descriptions: Cung cấp 3 phương án mô tả chi tiết lỗi vệ sinh/5S.
+   -> remedySuggestion: Hướng dẫn vệ sinh, lau sàn bằng dung dịch chuyên dụng, dọn rác, sắp xếp 5S.
 
-3. NẾU HIỆN TRƯỜNG VÀ CON NGƯỜI HOÀN TOÀN ĐẠT CHUẨN (đầy đủ BHLĐ mũ giày găng tay, thiết bị sạch đẹp an toàn):
-   - hasDefect = false
-   - severity = "Bình thường"
-   - defectTitle = "Hiện trường & Thiết bị đạt chuẩn an toàn"`;
+3. NẾU HIỆN TRƯỜNG VÀ CON NGƯỜI HOÀN TOÀN ĐẠT CHUẨN:
+   - Sàn nhà sạch bóng, không có bụi bẩn hay vết ố, không có dầu mỡ, đồ đạc ngăn nắp 5S, con người trang bị đầy đủ BHLĐ.
+   -> hasDefect = false
+   -> severity = "Bình thường"
+   -> defectTitle = "Hiện trường & Thiết bị đạt chuẩn an toàn – 5S"
+   LƯU Ý QUAN TRỌNG: Chỉ chọn mục này khi sàn nhà và bề mặt thiết bị THỰC SỰ SẠCH SẼ. Nếu nhìn thấy sàn có vết ố, bụi, rác hay vết bẩn, BẮT BUỘC PHẢI BÁO hasDefect = true với phân loại tương ứng.`;
 
     // Học theo ngữ cảnh: ví dụ mẫu từ Google Sheet + sổ tay các ca người dùng đã sửa
     const prompt = basePrompt + buildLearningContext({ lessons, sheetExamples });
