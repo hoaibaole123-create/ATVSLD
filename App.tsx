@@ -75,7 +75,6 @@ import {
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { AiVisionDefectAnalyzer } from './src/components/AiVisionDefectAnalyzer';
-import { recordLesson } from './src/lib/aiKnowledgeBase';
 
 // --- Consolidated Types ---
 export enum DefectStatus {
@@ -1321,10 +1320,9 @@ const DefectForm: React.FC = () => {
   const [images, setImages] = useState<{file: File, preview: string}[]>([]);
   const [showAiModal, setShowAiModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   
   const [locationSearch, setLocationSearch] = useState('');
-  // Lưu gợi ý gốc của AI để đối chiếu với chỉnh sửa của người dùng (Học theo ngữ cảnh)
-  const aiSuggestionRef = useRef<Record<string, string> | null>(null);
 
   const [formData, setFormData] = useState({
     reporterName: '',
@@ -1373,20 +1371,6 @@ const DefectForm: React.FC = () => {
       return;
     }
 
-    // Ghi nhận bài học kinh nghiệm nếu người dùng đã sửa lại gợi ý của AI
-    if (aiSuggestionRef.current) {
-      recordLesson({
-        formType: 'report',
-        aiSuggestion: aiSuggestionRef.current,
-        userCorrection: {
-          category: formData.category,
-          area: formData.area,
-          equipmentName: formData.equipmentName,
-          description: formData.description,
-        },
-      });
-    }
-
     setIsSubmitting(true);
     try {
       const filesPayload = await Promise.all(images.map(img => {
@@ -1414,7 +1398,6 @@ const DefectForm: React.FC = () => {
         setShowSuccess(false);
         setFormData({ reporterName: '', category: '', area: '', equipmentName: '', location: '', description: '' });
         setImages([]);
-        aiSuggestionRef.current = null;
       }, 3000);
 
     } catch (err) {
@@ -1593,12 +1576,43 @@ const DefectForm: React.FC = () => {
 
           <section>
             <FormLabel>Hình ảnh minh chứng</FormLabel>
-            <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl p-6 flex flex-col items-center justify-center text-center bg-slate-50 dark:bg-slate-900 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors">
-              <input type="file" ref={fileInputRef} multiple accept="image/*" className="hidden" onChange={handleImageChange} />
-              <UploadCloud className="text-blue-500 mb-3" size={32} />
-              <span className="px-6 py-2 bg-blue-600 text-white text-[11px] font-bold rounded-lg uppercase shadow-md hover:bg-blue-700 transition-colors">
-                Chọn hình ảnh
-              </span>
+            <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl p-5 flex flex-col items-center justify-center text-center bg-slate-50 dark:bg-slate-900 transition-colors">
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                multiple 
+                accept="image/jpeg,image/png,image/webp,image/*" 
+                className="hidden" 
+                onChange={handleImageChange} 
+              />
+              <input 
+                type="file" 
+                ref={cameraInputRef} 
+                accept="image/jpeg,image/png,image/webp,image/*" 
+                capture="environment" 
+                className="hidden" 
+                onChange={handleImageChange} 
+              />
+              <UploadCloud className="text-blue-500 mb-2" size={32} />
+              <p className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-3">
+                Chụp ảnh hiện trường hoặc chọn ảnh từ thư viện thiết bị
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => cameraInputRef.current?.click()}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold rounded-xl uppercase shadow-md flex items-center gap-1.5 transition-all active:scale-95"
+                >
+                  <Camera size={14} /> Chụp ảnh
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold rounded-xl uppercase shadow-md flex items-center gap-1.5 transition-all active:scale-95"
+                >
+                  <UploadCloud size={14} /> Chọn từ thư viện
+                </button>
+              </div>
             </div>
 
             {images.length > 0 && (
@@ -1681,16 +1695,6 @@ const DefectForm: React.FC = () => {
         onClose={() => setShowAiModal(false)}
         images={images}
         formType="report"
-        learnFromSheetId={SHEET_ID}
-        learnFromSheetNames={CATEGORIES}
-        onAnalyzed={(result) => {
-          aiSuggestionRef.current = {
-            category: result.category || '',
-            area: result.suggestedArea || '',
-            equipmentName: result.equipmentName || '',
-            description: result.descriptions?.standard || '',
-          };
-        }}
         onApplyAllReport={(data) => {
           setFormData(prev => ({
             ...prev,
@@ -1700,13 +1704,9 @@ const DefectForm: React.FC = () => {
             // Không gợi ý/điền vào ô địa điểm (để người dùng tự chọn/nhập địa điểm)
             description: data.description || prev.description,
           }));
-          if (aiSuggestionRef.current && data.description) {
-            aiSuggestionRef.current.description = data.description;
-          }
         }}
         onApplyDescription={(desc) => {
           setFormData(prev => ({ ...prev, description: desc }));
-          if (aiSuggestionRef.current) aiSuggestionRef.current.description = desc;
         }}
       />
     </div>
@@ -2429,10 +2429,9 @@ const ProcessingForm: React.FC = () => {
   const [images, setImages] = useState<{file: File, preview: string}[]>([]);
   const [showAiModal, setShowAiModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const [formData, setFormData] = useState({ sheet: '', row: '', tinhTrang: '', ghiChu: '', NVVH: '' });
-  // Gợi ý gốc của AI cho biểu mẫu xử lý, dùng để rút bài học kinh nghiệm khi người dùng sửa lại
-  const aiProcessSuggestionRef = useRef<Record<string, string> | null>(null);
 
   const categories = [
     { label: 'An toàn vệ sinh lao động', value: 'An toàn vệ sinh lao động' },
@@ -2502,21 +2501,6 @@ const ProcessingForm: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.sheet || !formData.row) return alert("Vui lòng chọn đầy đủ thông tin!");
-
-    // Ghi nhận bài học kinh nghiệm nếu người dùng đã sửa lại gợi ý của AI
-    if (aiProcessSuggestionRef.current) {
-      recordLesson({
-        formType: 'process',
-        aiSuggestion: aiProcessSuggestionRef.current,
-        userCorrection: {
-          tinhTrang: formData.tinhTrang,
-          ghiChu: formData.ghiChu,
-          matchedSheet: formData.sheet,
-          matchedRow: String(formData.row || ''),
-        },
-      });
-    }
-
     setIsSubmitting(true);
     try {
       const filesPayload = await Promise.all(images.map(img => {
@@ -2546,7 +2530,6 @@ const ProcessingForm: React.FC = () => {
 
       setShowSuccess1(true);
       setFormData({ sheet: '', row: '', tinhTrang: '', ghiChu: '', NVVH: '' });
-      aiProcessSuggestionRef.current = null;
       setImages([]);
       setDefectList([]);
       setMatchedItemInfo(null);
@@ -2650,16 +2633,55 @@ if (showSuccess1) {
         
         <section>
           <FormLabel icon="🖼️">Hình ảnh minh chứng ( bắt buộc phải có hình ảnh để kết thúc tồn tại)</FormLabel>
-          <div className="flex items-center gap-4 p-3 border border-slate-300 rounded-lg bg-white">
-            <button type="button" onClick={() => fileInputRef.current?.click()} className="px-4 py-1.5 bg-slate-100 border border-slate-300 rounded text-sm font-medium hover:bg-slate-200 transition-colors">Chọn tệp</button>
-            <span className="text-sm text-slate-500">{images.length > 0 ? `${images.length} tệp đã chọn` : "Chưa chọn"}</span>
-            <input type="file" ref={fileInputRef} multiple className="hidden" onChange={(e) => { 
-              if (e.target.files && e.target.files.length > 0) {
-                const newFiles = Array.from(e.target.files).map((f: File) => ({ file: f, preview: URL.createObjectURL(f) }));
-                setImages(prev => [...prev, ...newFiles]);
-                setShowAiModal(true);
-              }
-            }} />
+          <div className="p-4 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl bg-white dark:bg-slate-900 flex flex-col items-center justify-center text-center">
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              multiple 
+              accept="image/jpeg,image/png,image/webp,image/*" 
+              className="hidden" 
+              onChange={(e) => { 
+                if (e.target.files && e.target.files.length > 0) {
+                  const newFiles = Array.from(e.target.files).map((f: File) => ({ file: f, preview: URL.createObjectURL(f) }));
+                  setImages(prev => [...prev, ...newFiles]);
+                  setShowAiModal(true);
+                }
+              }} 
+            />
+            <input 
+              type="file" 
+              ref={cameraInputRef} 
+              accept="image/jpeg,image/png,image/webp,image/*" 
+              capture="environment" 
+              className="hidden" 
+              onChange={(e) => { 
+                if (e.target.files && e.target.files.length > 0) {
+                  const newFiles = Array.from(e.target.files).map((f: File) => ({ file: f, preview: URL.createObjectURL(f) }));
+                  setImages(prev => [...prev, ...newFiles]);
+                  setShowAiModal(true);
+                }
+              }} 
+            />
+            <UploadCloud className="text-blue-500 mb-2" size={28} />
+            <p className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2.5">
+              {images.length > 0 ? `Đã chọn ${images.length} tệp hình ảnh minh chứng` : "Chụp ảnh tại chỗ hoặc chọn ảnh từ thư viện"}
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <button 
+                type="button" 
+                onClick={() => cameraInputRef.current?.click()} 
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl uppercase shadow-md flex items-center gap-1.5 transition-all active:scale-95"
+              >
+                <Camera size={14} /> Chụp ảnh ngay
+              </button>
+              <button 
+                type="button" 
+                onClick={() => fileInputRef.current?.click()} 
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl uppercase shadow-md flex items-center gap-1.5 transition-all active:scale-95"
+              >
+                <UploadCloud size={14} /> Chọn từ thư viện
+              </button>
+            </div>
           </div>
 
           {images.length > 0 && (
@@ -2713,17 +2735,7 @@ if (showSuccess1) {
         onClose={() => setShowAiModal(false)}
         images={images}
         formType="process"
-        learnFromSheetId={SHEET_ID}
-        learnFromSheetNames={CATEGORIES}
         pendingDefects={allPendingDefects.length > 0 ? allPendingDefects : defectList}
-        onAnalyzed={(result) => {
-          aiProcessSuggestionRef.current = {
-            tinhTrang: result.processStatus || '',
-            ghiChu: result.processNote || result.descriptions?.concise || '',
-            matchedSheet: result.matchedDefect?.sheet || '',
-            matchedRow: result.matchedDefect?.row != null ? String(result.matchedDefect.row) : '',
-          };
-        }}
         onApplyProcess={(data) => {
           if (data.sheet) {
             setFormData(prev => ({
