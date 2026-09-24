@@ -1,20 +1,23 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { buildLearningContext } from "./_learningContext";
 
-/**
- * Handler danh gia hinh anh bang Gemini Vision.
- *
- * Day la NGUON DUY NHAT cua logic nay. server.ts chi la lop vo cho moi truong
- * dev (npm run dev) va goi thang vao handler nay, nen khong con canh viet lap
- * prompt o hai noi nhu truoc.
- */
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '10mb',
+    },
+  },
+  maxDuration: 60,
+};
 
-// Lazy initialize Gemini API client
 let aiClient: GoogleGenAI | null = null;
 function getGenAI(): GoogleGenAI {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("Chưa cấu hình GEMINI_API_KEY trên Vercel. Vui lòng vào Vercel Dashboard -> Settings -> Environment Variables và thêm GEMINI_API_KEY.");
+  }
   if (!aiClient) {
     aiClient = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
+      apiKey: apiKey,
       httpOptions: {
         headers: {
           'User-Agent': 'aistudio-build',
@@ -25,19 +28,14 @@ function getGenAI(): GoogleGenAI {
   return aiClient;
 }
 
-// Helper with retry & multi-model fallback for Gemini requests
 async function generateWithFallback(ai: GoogleGenAI, generateParams: any) {
-  // Try ultra-fast gemini-3.1-flash-lite (highest throughput, ultra-fast latency, avoids 503 high demand), then gemini-3.7-flash, then gemini-flash-latest
-  const models = ["gemini-3.1-flash-lite", "gemini-3.7-flash", "gemini-flash-latest"];
+  const models = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite", "gemini-3.8-flash"];
   let lastError: any = null;
 
   for (const model of models) {
     try {
       const modelConfig = { ...generateParams.config };
-      // thinkingConfig is only valid on gemini-3.7 models; delete it for other models to prevent 400 errors
-      if (!model.includes("3.7")) {
-        delete modelConfig.thinkingConfig;
-      }
+      delete modelConfig.thinkingConfig;
 
       const response = await ai.models.generateContent({
         ...generateParams,
@@ -53,37 +51,36 @@ async function generateWithFallback(ai: GoogleGenAI, generateParams: any) {
   throw lastError;
 }
 
-
 export default async function handler(req: any, res: any) {
-  res.setHeader("Access-Control-Allow-Credentials", "true");
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,PATCH,DELETE,POST,PUT");
+  // Enable CORS
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
   res.setHeader(
-    "Access-Control-Allow-Headers",
-    "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version"
+    'Access-Control-Allow-Headers',
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
   );
 
-  if (req.method === "OPTIONS") {
+  if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method Not Allowed" });
-  }
 
-  const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-
-  const { imageBase64, mimeType = "image/jpeg", formType = "report", pendingDefects = [], lessons = [], sheetExamples = [] } = body || {};
-  if (!imageBase64) {
-    return res.status(400).json({ error: "Dữ liệu hình ảnh không được để trống" });
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
   try {
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    const { imageBase64, mimeType = "image/jpeg", formType = "report", pendingDefects = [] } = body || {};
+
+    if (!imageBase64) {
+      return res.status(400).json({ error: "Dữ liệu hình ảnh không được để trống" });
+    }
+
     const ai = getGenAI();
     const cleanBase64 = imageBase64.includes(",") ? imageBase64.split(",")[1] : imageBase64;
-
     const isProcessing = formType === 'process';
-    
-    // Build candidate defect list text if provided for defect matching
+
     let defectsPromptContext = "";
     if (pendingDefects && Array.isArray(pendingDefects) && pendingDefects.length > 0) {
       defectsPromptContext = `\n\nDANH SÁCH CÁC TỒN TẠI ĐANG CHỜ XỬ LÝ TRONG HỆ THỐNG:\n` +
@@ -93,7 +90,7 @@ export default async function handler(req: any, res: any) {
         `\n\nNhiệm vụ khớp tồn tại: Hãy đối chiếu hình ảnh với danh sách tồn tại trên. Nhận diện xem ảnh này khớp nhất với tồn tại nào (chỉ rõ sheet, row, tên thiết bị, nội dung, độ tin cậy "high"|"medium"|"low", và lý do nhận diện cụ thể). Nếu không có mục nào khớp thì matchedDefect có thể để trống hoặc confidence là "low".`;
     }
 
-    const basePrompt = isProcessing
+    const prompt = isProcessing
       ? `Bạn là chuyên gia thẩm định kỹ thuật, an toàn vệ sinh lao động (ATVSLĐ) và 5S/TPM tại nhà máy công nghiệp / thủy điện Ialy.
 Hãy phân tích nhanh hình ảnh minh chứng kết quả xử lý / khắc phục tồn tại này.
 1. Tự động nhận diện và đối chiếu xem ảnh này thuộc về tồn tại nào đã lưu trong danh sách tồn tại đang chờ xử lý.
@@ -142,9 +139,6 @@ QUY TẮC PHÂN LOẠI & ĐÁNH GIÁ:
    -> defectTitle = "Hiện trường & Thiết bị đạt chuẩn an toàn – 5S"
    LƯU Ý QUAN TRỌNG: Chỉ chọn mục này khi sàn nhà và bề mặt thiết bị THỰC SỰ SẠCH SẼ. Nếu nhìn thấy sàn có vết ố, bụi, rác hay vết bẩn, BẮT BUỘC PHẢI BÁO hasDefect = true với phân loại tương ứng.`;
 
-    // Học theo ngữ cảnh: ví dụ mẫu từ Google Sheet + sổ tay các ca người dùng đã sửa
-    const prompt = basePrompt + buildLearningContext({ lessons, sheetExamples });
-
     const response = await generateWithFallback(ai, {
       contents: [
         {
@@ -159,7 +153,7 @@ QUY TẮC PHÂN LOẠI & ĐÁNH GIÁ:
       ],
       config: {
         thinkingConfig: {
-          thinkingBudget: 0, // Turn off extended thinking for ultra-fast instant response
+          thinkingBudget: 0,
         },
         temperature: 0.2,
         maxOutputTokens: 1024,
@@ -173,40 +167,39 @@ QUY TẮC PHÂN LOẠI & ĐÁNH GIÁ:
             categoryLabel: { type: Type.STRING, description: "Tên phân loại tiếng Việt: An toàn vệ sinh lao động hoặc ISO, KAIZEN 5S, TPM" },
             equipmentName: { type: Type.STRING, description: "Tên thiết bị hoặc kết cấu nhận diện được" },
             suggestedArea: { type: Type.STRING, description: "Gợi ý khu vực: ialy-hien-huu, ialy-mo-rong, cua-nhan-nuoc, opy-500" },
-            suggestedLocation: { type: Type.STRING, description: "Vị trí lắp đặt chi tiết, ưu tiên khớp chính xác với danh sách chuẩn: Trạm OPY ▼ 550, Phòng Điều Khiển - Trạm OPY ▼ 550, Trạm Phân Phối Ngoài Trời - Trạm OPY ▼ 550, CNN, CNN Ialy Hiện Hữu ▼522, CNN Ialy Mở Rộng ▼522, Đập Tràn ▼ 522, THB11 - Đập tràn ▼522, Tời Nâng - Đập tràn ▼522, NMTĐ IALY MỞ RỘNG, TRẠM CHUYỂN TIẾP ▼ 358,5, CÁC HỆ THỐNG, THIẾT BỊ ▼ 348, Máy biến áp 500kV ▼ 348, Trạm xử lý nước, dầu ▼ 348, Trạm bơm chữa cháy ▼ 348, Trạm Diezel dự phòng ▼ 348, Khu vực hạ lưu NM ▼ 348, GIAN MÁY, Cao trình 288,3-GM, Cao trình 292,7-GM, Cao trình 298,3-GM, Hầm tua bin ▼ 298,3-GM, Cao trình 303,9-GM, Buồng MF H5 ▼ 303,9-GM, Buồng MF H6 ▼ 303,9-GM, Cao trình 309,5-GM, Phòng thiết bị kích từ ▼ 309,5-GM, Phòng máy nén khí bù ▼ 309,5-GM, Phòng thông gió đẩy ▼ 309,5-GM, Phòng TG hút ▼ 316,6, Phòng thiết bị khí nén ▼ 316,6, Cao trình 323,7, Xưởng sửa chữa cơ khí ▼ 323,7, Cao trình 331,4, Phòng Tự dùng ▼ 331,4, Cao trình 339,1, Phòng ĐKTT ▼ 339,1, Cao Trình 309 - GM, Cao Trình 303 - GM, Cao Trình 299,2 - GM, Cao Trình 288,8 - GM, Cao Trình 284,2 - GM, Cao Trình 277 - GM, Gian Biến Áp, Cao Trình 327,8 - GBA, Cao Trình 323,8 - GBA, Cao Trình 340 - GBA, Cao Trình 332 - GBA, Cao Trình 336,5 - GBA, Nhà Khử Khí ▼ 355,7, Các Hệ Thống, Thiết Bị Nhà PK, Trạm Hợp Bộ 6 - nhà PK, Thông Gió Đẩy - nhà PK, Phòng ĐKTT - nhà PK" },
+            suggestedLocation: { type: Type.STRING, description: "Vị trí lắp đặt chi tiết" },
             severity: { type: Type.STRING, description: "Mức độ rủi ro: Bình thường | Thấp | Trung bình | Cao | Khẩn cấp" },
             observations: {
               type: Type.ARRAY,
               items: { type: Type.STRING },
-              description: "Danh sách 2-4 chi tiết quan sát thấy trong ảnh (điểm lỗi hoặc điểm đạt chuẩn)"
+              description: "Danh sách 2-4 chi tiết quan sát thấy trong ảnh"
             },
             descriptions: {
               type: Type.OBJECT,
               properties: {
                 concise: { type: Type.STRING, description: "Gợi ý mô tả súc tích (1 câu)" },
-                standard: { type: Type.STRING, description: "Gợi ý mô tả tiêu chuẩn (đầy đủ hiện tượng và vị trí)" },
-                detailed: { type: Type.STRING, description: "Gợi ý mô tả chi tiết chuyên sâu kèm nhận định nguy cơ" }
+                standard: { type: Type.STRING, description: "Gợi ý mô tả tiêu chuẩn" },
+                detailed: { type: Type.STRING, description: "Gợi ý mô tả chi tiết chuyên sâu" }
               },
               required: ["concise", "standard", "detailed"]
             },
             remedySuggestion: { type: Type.STRING, description: "Biện pháp xử lý hoặc khuyến nghị kỹ thuật" },
-            processStatus: { type: Type.STRING, description: "Gợi ý cho ô Tình trạng khi hoàn thành (ví dụ: Đã khắc phục hoàn tất)" },
-            processNote: { type: Type.STRING, description: "Gợi ý cho ô Ghi chú xử lý (ví dụ: Đã vệ sinh, thay mới gioăng và siết lại bulông chắc chắn)" },
+            processStatus: { type: Type.STRING, description: "Gợi ý cập nhật tình trạng xử lý" },
+            processNote: { type: Type.STRING, description: "Gợi ý nội dung ghi chú xử lý" },
             matchedDefect: {
               type: Type.OBJECT,
-              description: "Tồn tại khớp nhất tìm thấy trong danh sách đã lưu",
               properties: {
-                sheet: { type: Type.STRING, description: "Tên sheet của tồn tại: An toàn vệ sinh lao động hoặc TPM, Kaizen" },
-                row: { type: Type.INTEGER, description: "Số dòng (row) trong sheet" },
-                equipment: { type: Type.STRING, description: "Tên thiết bị của tồn tại khớp" },
-                location: { type: Type.STRING, description: "Vị trí của tồn tại khớp" },
-                description: { type: Type.STRING, description: "Nội dung tồn tại khớp" },
-                confidence: { type: Type.STRING, description: "Mức độ khớp: high, medium hoặc low" },
-                matchReason: { type: Type.STRING, description: "Giải thích ngắn lý do AI nhận diện bức ảnh này khớp với tồn tại trên" }
+                sheet: { type: Type.STRING },
+                row: { type: Type.INTEGER },
+                equipment: { type: Type.STRING },
+                location: { type: Type.STRING },
+                description: { type: Type.STRING },
+                confidence: { type: Type.STRING },
+                matchReason: { type: Type.STRING }
               }
             }
           },
-          required: ["defectTitle", "category", "equipmentName", "severity", "descriptions", "remedySuggestion"]
+          required: ["defectTitle", "category", "equipmentName", "severity", "descriptions"]
         }
       }
     });
@@ -218,16 +211,17 @@ QUY TẮC PHÂN LOẠI & ĐÁNH GIÁ:
     } else if (rawText.startsWith("```")) {
       rawText = rawText.replace(/^```\s*/i, "").replace(/\s*```$/i, "");
     }
-    const result = JSON.parse(rawText || "{}");
-    res.json({ success: true, analysis: result });
-  } catch (error: any) {
-    console.error("Gemini Vision Analysis Error:", error);
-    const isOverloaded = error?.status === 503 || error?.code === 503 || String(error?.message).includes("503") || String(error?.message).includes("demand");
-    res.status(500).json({ 
+    const parsed = JSON.parse(rawText || "{}");
+    return res.status(200).json({ success: true, analysis: parsed });
+  } catch (err: any) {
+    console.error("Vercel AI Analysis error:", err);
+    const isOverloaded = err?.status === 503 || err?.code === 503 || String(err?.message).includes("503") || String(err?.message).includes("demand");
+    return res.status(500).json({
+      success: false,
       error: isOverloaded 
         ? "Máy chủ AI hiện đang chịu tải cao tạm thời. Hệ thống đã thử lại tự động, vui lòng thử lại sau giây lát!" 
-        : "Không thể phân tích hình ảnh qua AI", 
-      details: error?.message || String(error) 
+        : (err?.message || "Lỗi khi xử lý hình ảnh qua AI"),
+      details: String(err)
     });
   }
 }
