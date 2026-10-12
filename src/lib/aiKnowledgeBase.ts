@@ -135,6 +135,8 @@ export function getLessonsForScan(
 export function serializeLessonsForApi(lessons: AiLesson[]) {
   return lessons.map((l) => ({
     formType: l.formType,
+    // Thiết bị trong ảnh giúp AI liên hệ "thấy thiết bị này → vị trí/cao trình đúng là ..."
+    equipment: l.userCorrection.equipmentName || l.aiSuggestion.equipmentName || '',
     corrections: l.correctedFields.map((f) => ({
       field: FIELD_LABELS[f] || f,
       aiSaid: l.aiSuggestion[f] || '(bỏ trống)',

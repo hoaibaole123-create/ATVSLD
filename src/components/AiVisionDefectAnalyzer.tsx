@@ -14,8 +14,13 @@ import {
   CheckCircle2, 
   Camera, 
   Lightbulb,
-  Bot
+  Bot,
+  MapPin
 } from 'lucide-react';
+import { AREA_LOCATIONS_MAP, findCatalogLocation, resolveLocation } from '../lib/locationCatalog';
+import { buildLessonPayload } from '../lib/aiKnowledgeBase';
+import { getCachedSheetExamples, serializeSheetExamplesForApi } from '../lib/sheetKnowledge';
+import { extractEquipmentCodes, lookupLocationMemory, rememberLocation, WEIGHT_APPLY } from '../lib/locationMemory';
 
 export interface AiVisionAnalysisResult {
   hasDefect?: boolean;
@@ -25,12 +30,21 @@ export interface AiVisionAnalysisResult {
   equipmentName: string;
   suggestedArea?: string;
   suggestedLocation?: string;
+  /** Chữ/biển báo AI đọc được trong ảnh */
+  visibleText?: string[];
+  /** Mã thiết bị đọc được trên thẻ tên */
+  equipmentCodes?: string[];
+  /** Cao trình đọc được trên biển/tường, rỗng nếu không thấy */
+  elevationSignText?: string;
+  locationEvidence?: string;
+  locationConfidence?: 'high' | 'medium' | 'low' | string;
+  alternativeLocations?: string[];
   severity: 'Bình thường' | 'Thấp' | 'Trung bình' | 'Cao' | 'Khẩn cấp' | string;
   observations?: string[];
   descriptions: {
-    concise: string;
     standard: string;
-    detailed: string;
+    concise?: string;
+    detailed?: string;
   };
   remedySuggestion?: string;
   processStatus?: string;
@@ -56,7 +70,13 @@ interface AiVisionDefectAnalyzerProps {
     equipmentName?: string;
     location?: string;
     description?: string;
+    /** Vị trí AI tự xác định trước khi người dùng chỉnh, dùng để ghi bài học */
+    aiLocation?: string;
+    /** Mã thiết bị trong ảnh, dùng để ghi nhớ vị trí khi gửi báo cáo */
+    equipmentCodes?: string[];
   }) => void;
+  /** Khu vực người dùng đã chọn trên biểu mẫu, giúp AI thu hẹp danh sách cao trình */
+  areaHint?: string;
   onApplyDescription?: (text: string) => void;
   formType?: 'report' | 'process';
   pendingDefects?: Array<{
@@ -217,6 +237,7 @@ export const AiVisionDefectAnalyzer: React.FC<AiVisionDefectAnalyzerProps> = ({
   formType = 'report',
   pendingDefects = [],
   onApplyProcess,
+  areaHint,
 }) => {
   const [selectedImageIdx, setSelectedImageIdx] = useState<number>(0);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
@@ -227,6 +248,46 @@ export const AiVisionDefectAnalyzer: React.FC<AiVisionDefectAnalyzerProps> = ({
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [appliedNotification, setAppliedNotification] = useState<string | null>(null);
   const scannedImagesRef = React.useRef<{ [key: string]: AiVisionAnalysisResult }>({});
+  const [chosenLocation, setChosenLocation] = useState<string>('');
+
+  // Mã thiết bị trong ảnh: lấy từ trường AI tách riêng, cộng thêm chữ đọc được và tên thiết bị
+  const equipmentCodes = React.useMemo(
+    () =>
+      analysisResult
+        ? extractEquipmentCodes([
+            ...(analysisResult.equipmentCodes || []),
+            ...(analysisResult.visibleText || []),
+            analysisResult.equipmentName,
+          ])
+        : [],
+    [analysisResult]
+  );
+
+  // Chốt vị trí theo thứ tự tin cậy: biển cao trình trong ảnh → mã thiết bị đã học → suy luận của AI
+  const resolvedLocation = React.useMemo(() => {
+    if (!analysisResult || formType !== 'report') return null;
+    return resolveLocation({
+      aiLocation: analysisResult.suggestedLocation,
+      aiConfidence: analysisResult.locationConfidence,
+      elevationSignText: analysisResult.elevationSignText,
+      areaHint,
+      memory: lookupLocationMemory(equipmentCodes),
+    });
+  }, [analysisResult, areaHint, formType, equipmentCodes]);
+
+  // Chỉ tự điền khi đủ tin cậy. Đoán mò (low) thì để trống, đưa thành gợi ý để người dùng tự bấm chọn,
+  // vì điền sai cao trình nguy hiểm hơn để trống.
+  React.useEffect(() => {
+    setChosenLocation(resolvedLocation && resolvedLocation.confidence !== 'low' ? resolvedLocation.location : '');
+  }, [resolvedLocation]);
+
+  const locationSuggestions = React.useMemo(() => {
+    const list = [
+      ...(resolvedLocation?.confidence === 'low' ? [resolvedLocation.location] : []),
+      ...(analysisResult?.alternativeLocations || []),
+    ];
+    return Array.from(new Set(list.filter((l) => l && l !== chosenLocation && findCatalogLocation(l))));
+  }, [resolvedLocation, analysisResult, chosenLocation]);
 
   // Auto scan when modal opens or when selected image changes
   React.useEffect(() => {
@@ -264,7 +325,8 @@ export const AiVisionDefectAnalyzer: React.FC<AiVisionDefectAnalyzerProps> = ({
         throw new Error("Không tìm thấy dữ liệu ảnh để phân tích");
       }
 
-      const { base64, mimeType } = await compressImageForAi(targetSource, 800, 0.72);
+      // 1280px để AI còn đọc được biển cao trình / chữ nhỏ trên tường (800px thường bị nhòe)
+      const { base64, mimeType } = await compressImageForAi(targetSource, 1280, 0.8);
 
       const response = await fetch("/api/analyze-defect-image", {
         method: "POST",
@@ -274,6 +336,9 @@ export const AiVisionDefectAnalyzer: React.FC<AiVisionDefectAnalyzerProps> = ({
           mimeType: mimeType,
           formType: formType,
           pendingDefects: pendingDefects && pendingDefects.length > 0 ? pendingDefects.slice(0, 25) : undefined,
+          areaHint: areaHint || undefined,
+          lessons: buildLessonPayload(formType === 'process' ? 'process' : 'report'),
+          sheetExamples: serializeSheetExamplesForApi(getCachedSheetExamples()),
         }),
       });
 
@@ -325,13 +390,23 @@ export const AiVisionDefectAnalyzer: React.FC<AiVisionDefectAnalyzerProps> = ({
 
     if (formType === 'report' && onApplyAllReport) {
       const chosenDescription = analysisResult.descriptions[selectedDescType] || analysisResult.descriptions.standard;
+      const locationEntry = findCatalogLocation(chosenLocation);
+      // Người dùng bấm Áp dụng = xác nhận vị trí → ghi nhớ cho các mã thiết bị trong ảnh
+      if (locationEntry) rememberLocation(equipmentCodes, locationEntry.location, WEIGHT_APPLY);
       onApplyAllReport({
         category: analysisResult.category,
-        area: analysisResult.suggestedArea,
+        area: locationEntry?.area || analysisResult.suggestedArea,
         equipmentName: analysisResult.equipmentName,
+        location: locationEntry?.location,
         description: chosenDescription,
+        aiLocation: findCatalogLocation(analysisResult.suggestedLocation)?.location,
+        equipmentCodes,
       });
-      setAppliedNotification("Đã áp dụng gợi ý (Phân loại, Thiết bị, Mô tả) vào biểu mẫu!");
+      setAppliedNotification(
+        locationEntry
+          ? "Đã áp dụng gợi ý (Phân loại, Khu vực, Địa điểm, Thiết bị, Mô tả) vào biểu mẫu!"
+          : "Đã áp dụng gợi ý (Phân loại, Thiết bị, Mô tả) vào biểu mẫu!"
+      );
       setTimeout(() => {
         setAppliedNotification(null);
         onClose();
@@ -342,7 +417,7 @@ export const AiVisionDefectAnalyzer: React.FC<AiVisionDefectAnalyzerProps> = ({
         sheet: targetMatch?.sheet,
         row: targetMatch?.row,
         tinhTrang: analysisResult.processStatus || 'Đã khắc phục hoàn tất',
-        ghiChu: analysisResult.processNote || analysisResult.descriptions?.concise || 'Đã xử lý và khắc phục hoàn tất',
+        ghiChu: analysisResult.processNote || analysisResult.descriptions?.standard || 'Đã xử lý và khắc phục hoàn tất',
         matchedDefect: targetMatch,
       });
       setAppliedNotification("Đã tự động chọn tồn tại và điền kết quả vào biểu mẫu!");
@@ -639,7 +714,7 @@ export const AiVisionDefectAnalyzer: React.FC<AiVisionDefectAnalyzerProps> = ({
                           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Ghi chú đề xuất:</label>
                           <button
                             type="button"
-                            onClick={() => handleCopy(analysisResult.processNote || analysisResult.descriptions.concise, 'note')}
+                            onClick={() => handleCopy(analysisResult.processNote || analysisResult.descriptions.standard, 'note')}
                             className="text-xs text-blue-600 hover:underline flex items-center gap-1"
                           >
                             {copiedKey === 'note' ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
@@ -650,7 +725,7 @@ export const AiVisionDefectAnalyzer: React.FC<AiVisionDefectAnalyzerProps> = ({
                           rows={2}
                           readOnly
                           className="w-full p-2.5 text-xs rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 resize-none"
-                          value={analysisResult.processNote || analysisResult.descriptions.concise || 'Đã kiểm tra và xử lý dứt điểm khiếm khuyết.'}
+                          value={analysisResult.processNote || analysisResult.descriptions.standard || 'Đã kiểm tra và xử lý dứt điểm khiếm khuyết.'}
                         />
                       </div>
                     </div>
@@ -671,25 +746,6 @@ export const AiVisionDefectAnalyzer: React.FC<AiVisionDefectAnalyzerProps> = ({
                         </span>
                       </div>
 
-                      {/* Severity Badge */}
-                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider flex items-center gap-1 ${
-                        analysisResult.hasDefect === false || analysisResult.severity === 'Bình thường'
-                          ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-300'
-                          : analysisResult.severity === 'Khẩn cấp' || analysisResult.severity === 'Cao'
-                          ? 'bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 border border-rose-200'
-                          : analysisResult.severity === 'Trung bình'
-                          ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border border-amber-200'
-                          : 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200'
-                      }`}>
-                        {analysisResult.hasDefect === false || analysisResult.severity === 'Bình thường' ? (
-                          <CheckCircle2 size={12} className="text-emerald-600" />
-                        ) : (
-                          <ShieldAlert size={12} />
-                        )}
-                        {analysisResult.hasDefect === false || analysisResult.severity === 'Bình thường'
-                          ? 'Trạng thái: Bình thường'
-                          : `Rủi ro: ${analysisResult.severity}`}
-                      </span>
                     </div>
 
                     {/* Normal Status Banner if no defects */}
@@ -716,22 +772,76 @@ export const AiVisionDefectAnalyzer: React.FC<AiVisionDefectAnalyzerProps> = ({
                       </div>
                     </div>
 
-                    {/* Observations list */}
-                    {analysisResult.observations && analysisResult.observations.length > 0 && (
-                      <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/40">
-                        <p className="text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1.5">
-                          Chi tiết nhận biết từ ảnh:
-                        </p>
-                        <ul className="space-y-1">
-                          {analysisResult.observations.map((obs, oIdx) => (
-                            <li key={oIdx} className="text-xs text-slate-600 dark:text-slate-300 flex items-start gap-2">
-                              <span className="text-blue-500 shrink-0 font-bold">•</span>
-                              <span>{obs}</span>
-                            </li>
+                  </div>
+
+                  {/* Vị trí / Cao trình nhận diện */}
+                  <div className={`p-4 rounded-2xl border space-y-2.5 ${
+                    resolvedLocation?.confidence === 'high'
+                      ? 'bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-800'
+                      : 'bg-amber-50/60 dark:bg-amber-950/20 border-amber-300 dark:border-amber-800'
+                  }`}>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs font-black text-slate-800 dark:text-slate-100 uppercase tracking-wide flex items-center gap-1.5">
+                        <MapPin size={16} className="text-blue-600" />
+                        Vị trí / Cao trình nhận diện
+                      </span>
+                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                        resolvedLocation?.confidence === 'high'
+                          ? 'bg-emerald-600 text-white'
+                          : resolvedLocation?.confidence === 'medium'
+                          ? 'bg-amber-500 text-white'
+                          : 'bg-rose-500 text-white'
+                      }`}>
+                        {resolvedLocation?.confidence === 'high'
+                          ? 'Chắc chắn'
+                          : resolvedLocation?.confidence === 'medium'
+                          ? 'Khá chắc – nên kiểm tra'
+                          : 'Chưa chắc – hãy chọn lại'}
+                      </span>
+                    </div>
+
+                    <select
+                      className="w-full p-2.5 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      value={chosenLocation}
+                      onChange={(e) => setChosenLocation(e.target.value)}
+                    >
+                      <option value="">-- Chưa xác định, tự chọn vị trí --</option>
+                      {Object.entries(AREA_LOCATIONS_MAP).map(([areaKey, cfg]) => (
+                        <optgroup key={areaKey} label={cfg.name}>
+                          {cfg.locations.map((loc) => (
+                            <option key={loc} value={loc}>{loc}</option>
                           ))}
-                        </ul>
+                        </optgroup>
+                      ))}
+                    </select>
+
+                    {locationSuggestions.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase">
+                          {chosenLocation ? 'Hoặc:' : 'AI đoán (bấm để chọn):'}
+                        </span>
+                        {locationSuggestions.map((l) => (
+                            <button
+                              key={l}
+                              type="button"
+                              onClick={() => setChosenLocation(l)}
+                              className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-blue-700 dark:text-blue-300 hover:bg-blue-50"
+                            >
+                              {l}
+                            </button>
+                          ))}
                       </div>
                     )}
+
+                    <div className="text-[11px] text-slate-600 dark:text-slate-300 space-y-0.5">
+                      {equipmentCodes.length > 0 && (
+                        <p><strong>Mã thiết bị:</strong> {equipmentCodes.join(', ')}</p>
+                      )}
+                      {analysisResult.elevationSignText && (
+                        <p><strong>Biển cao trình đọc được:</strong> {analysisResult.elevationSignText}</p>
+                      )}
+                    </div>
+
                   </div>
 
                   {/* Description Suggestions Section */}
@@ -739,7 +849,7 @@ export const AiVisionDefectAnalyzer: React.FC<AiVisionDefectAnalyzerProps> = ({
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-black uppercase text-slate-700 dark:text-slate-200 tracking-wider flex items-center gap-1.5">
                         <Lightbulb size={16} className="text-amber-500" />
-                        Gợi ý mô tả tồn tại ({Object.keys(analysisResult.descriptions).length} phương án)
+                        Gợi ý mô tả tồn tại
                       </span>
                       <span className="text-[10px] text-slate-400">
                         Bấm chọn để áp dụng ngay
@@ -763,7 +873,7 @@ export const AiVisionDefectAnalyzer: React.FC<AiVisionDefectAnalyzerProps> = ({
                             {selectedDescType === 'standard' && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
                           </div>
                           <span className="text-[11px] font-black uppercase tracking-wider text-blue-700 dark:text-blue-400">
-                            📋 Phương án tiêu chuẩn (Khuyên dùng)
+                            📋 Mô tả tiêu chuẩn
                           </span>
                         </div>
                         <button
@@ -795,103 +905,6 @@ export const AiVisionDefectAnalyzer: React.FC<AiVisionDefectAnalyzerProps> = ({
                       </div>
                     </div>
 
-                    {/* Option 2: Concise */}
-                    <div 
-                      onClick={() => setSelectedDescType('concise')}
-                      className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
-                        selectedDescType === 'concise'
-                          ? 'border-blue-500 bg-blue-50/70 dark:bg-blue-900/20 ring-2 ring-blue-500/20'
-                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-1.5">
-                        <div className="flex items-center gap-2">
-                          <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
-                            selectedDescType === 'concise' ? 'border-blue-600 bg-blue-600' : 'border-slate-300'
-                          }`}>
-                            {selectedDescType === 'concise' && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
-                          </div>
-                          <span className="text-[11px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                            ⚡ Phương án ngắn gọn (1 câu)
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleCopy(analysisResult.descriptions.concise, 'concise');
-                          }}
-                          className="p-1 text-slate-400 hover:text-slate-600 rounded-md transition-colors"
-                          title="Sao chép"
-                        >
-                          {copiedKey === 'concise' ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
-                        </button>
-                      </div>
-                      <p className="text-xs text-slate-700 dark:text-slate-200 leading-relaxed pl-6">
-                        {analysisResult.descriptions.concise}
-                      </p>
-                      <div className="mt-2.5 pl-6 flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleApplySingleDescription(analysisResult.descriptions.concise);
-                          }}
-                          className="px-3 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-blue-600 dark:text-blue-400 font-bold text-[10px] rounded-lg hover:bg-blue-50 uppercase tracking-wider"
-                        >
-                          Áp dụng mô tả này
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Option 3: Detailed */}
-                    <div 
-                      onClick={() => setSelectedDescType('detailed')}
-                      className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
-                        selectedDescType === 'detailed'
-                          ? 'border-blue-500 bg-blue-50/70 dark:bg-blue-900/20 ring-2 ring-blue-500/20'
-                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-1.5">
-                        <div className="flex items-center gap-2">
-                          <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
-                            selectedDescType === 'detailed' ? 'border-blue-600 bg-blue-600' : 'border-slate-300'
-                          }`}>
-                            {selectedDescType === 'detailed' && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
-                          </div>
-                          <span className="text-[11px] font-black uppercase tracking-wider text-purple-700 dark:text-purple-400">
-                            🔬 Phương án chi tiết & Cảnh báo nguy cơ
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleCopy(analysisResult.descriptions.detailed, 'detailed');
-                          }}
-                          className="p-1 text-slate-400 hover:text-slate-600 rounded-md transition-colors"
-                          title="Sao chép"
-                        >
-                          {copiedKey === 'detailed' ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
-                        </button>
-                      </div>
-                      <p className="text-xs text-slate-700 dark:text-slate-200 leading-relaxed pl-6">
-                        {analysisResult.descriptions.detailed}
-                      </p>
-                      <div className="mt-2.5 pl-6 flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleApplySingleDescription(analysisResult.descriptions.detailed);
-                          }}
-                          className="px-3 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-blue-600 dark:text-blue-400 font-bold text-[10px] rounded-lg hover:bg-blue-50 uppercase tracking-wider"
-                        >
-                          Áp dụng mô tả này
-                        </button>
-                      </div>
-                    </div>
                   </div>
 
                   {/* Remedy Suggestion */}

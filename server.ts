@@ -3,6 +3,8 @@ import axios from "axios";
 import path from "path";
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, Type } from "@google/genai";
+import { buildLocationPrompt, withLocationSchema, normalizeLocationFields } from "./api/_locationPrompt.js";
+import { buildLearningContext } from "./api/_learningContext.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,13 +35,20 @@ function getGenAI(): GoogleGenAI {
 
 // Helper with retry & multi-model fallback for Gemini requests
 async function generateWithFallback(ai: GoogleGenAI, generateParams: any) {
-  const models = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite", "gemini-3.8-flash"];
+  // Thứ tự theo đo thực tế (10/2026): flash-lite nhanh nhất (~6s) và đọc biển tốt; gemini-2.5-flash đã ngừng cấp
+  // cho key mới (404) nên bỏ khỏi danh sách để không mất thời gian thử hỏng mỗi lần quét.
+  // Mức suy nghĩ thấp nhất mà từng model chấp nhận, để phản hồi nhanh.
+  const models: Array<{ name: string; thinkingLevel: string }> = [
+    { name: "gemini-3.1-flash-lite", thinkingLevel: "minimal" },
+    { name: "gemini-3.8-flash", thinkingLevel: "low" },
+    { name: "gemini-flash-latest", thinkingLevel: "low" },
+  ];
   let lastError: any = null;
 
-  for (const model of models) {
+  for (const { name: model, thinkingLevel } of models) {
     try {
       const modelConfig = { ...generateParams.config };
-      delete modelConfig.thinkingConfig;
+      modelConfig.thinkingConfig = { thinkingLevel };
 
       const response = await ai.models.generateContent({
         ...generateParams,
@@ -57,7 +66,7 @@ async function generateWithFallback(ai: GoogleGenAI, generateParams: any) {
 
 // API Route: AI Image Evaluation & Description Suggestions
 app.post("/api/analyze-defect-image", async (req, res) => {
-  const { imageBase64, mimeType = "image/jpeg", formType = "report", pendingDefects = [] } = req.body;
+  const { imageBase64, mimeType = "image/jpeg", formType = "report", pendingDefects = [], areaHint = "", lessons = [], sheetExamples = [] } = req.body;
   if (!imageBase64) {
     return res.status(400).json({ error: "Dữ liệu hình ảnh không được để trống" });
   }
@@ -118,7 +127,7 @@ QUY TẮC PHÂN LOẠI & ĐÁNH GIÁ:
       * "Trung bình": Sàn bẩn rõ rệt, bám bụi nhiều hoặc có vết dầu khô chiếm 10-30% diện tích quan sát.
       * "Cao": Sàn rất bẩn, dầu loang rộng hoặc bụi dày trên thiết bị điện gây nguy cơ quá nhiệt.
    -> observations: Mô tả chi tiết các điểm bẩn, vị trí cụ thể trên sàn hoặc thiết bị.
-   -> descriptions: Cung cấp 3 phương án mô tả chi tiết lỗi vệ sinh/5S.
+   -> descriptions.standard: 1 đoạn mô tả tiêu chuẩn lỗi vệ sinh/5S.
    -> remedySuggestion: Hướng dẫn vệ sinh, lau sàn bằng dung dịch chuyên dụng, dọn rác, sắp xếp 5S.
 
 3. NẾU HIỆN TRƯỜNG VÀ CON NGƯỜI HOÀN TOÀN ĐẠT CHUẨN:
@@ -126,7 +135,52 @@ QUY TẮC PHÂN LOẠI & ĐÁNH GIÁ:
    -> hasDefect = false
    -> severity = "Bình thường"
    -> defectTitle = "Hiện trường & Thiết bị đạt chuẩn an toàn – 5S"
-   LƯU Ý QUAN TRỌNG: Chỉ chọn mục này khi sàn nhà và bề mặt thiết bị THỰC SỰ SẠCH SẼ. Nếu nhìn thấy sàn có vết ố, bụi, rác hay vết bẩn, BẮT BUỘC PHẢI BÁO hasDefect = true với phân loại tương ứng.`;
+   LƯU Ý QUAN TRỌNG: Chỉ chọn mục này khi sàn nhà và bề mặt thiết bị THỰC SỰ SẠCH SẼ. Nếu nhìn thấy sàn có vết ố, bụi, rác hay vết bẩn, BẮT BUỘC PHẢI BÁO hasDefect = true với phân loại tương ứng.`
+      + buildLocationPrompt(areaHint)
+      + buildLearningContext({ lessons, sheetExamples });
+
+    const baseSchema = {
+      type: Type.OBJECT,
+      properties: {
+        hasDefect: { type: Type.BOOLEAN, description: "True nếu phát hiện lỗi/tồn tại/nguy cơ, False nếu ảnh bình thường/đạt chuẩn" },
+        defectTitle: { type: Type.STRING, description: "Tiêu đề ngắn gọn về tình trạng quan sát được" },
+        category: { type: Type.STRING, description: "Phân loại: safety hoặc iso-kaizen" },
+        categoryLabel: { type: Type.STRING, description: "Tên phân loại tiếng Việt: An toàn vệ sinh lao động hoặc ISO, KAIZEN 5S, TPM" },
+        equipmentName: { type: Type.STRING, description: "Tên thiết bị hoặc kết cấu nhận diện được" },
+        suggestedArea: { type: Type.STRING, description: "Gợi ý khu vực: ialy-hien-huu, ialy-mo-rong, cua-nhan-nuoc, opy-500" },
+        suggestedLocation: { type: Type.STRING, description: "Vị trí lắp đặt chi tiết" },
+        severity: { type: Type.STRING, description: "Mức độ rủi ro: Bình thường | Thấp | Trung bình | Cao | Khẩn cấp" },
+        observations: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description: "Danh sách 2-4 chi tiết quan sát thấy trong ảnh (điểm lỗi hoặc điểm đạt chuẩn)"
+        },
+        descriptions: {
+          type: Type.OBJECT,
+          properties: {
+            standard: { type: Type.STRING, description: "Gợi ý mô tả tiêu chuẩn (đầy đủ hiện tượng và vị trí)" }
+          },
+          required: ["standard"]
+        },
+        remedySuggestion: { type: Type.STRING, description: "Biện pháp xử lý hoặc khuyến nghị kỹ thuật" },
+        processStatus: { type: Type.STRING, description: "Gợi ý cho ô Tình trạng khi hoàn thành (ví dụ: Đã khắc phục hoàn tất)" },
+        processNote: { type: Type.STRING, description: "Gợi ý cho ô Ghi chú xử lý (ví dụ: Đã vệ sinh, thay mới gioăng và siết lại bulông chắc chắn)" },
+        matchedDefect: {
+          type: Type.OBJECT,
+          description: "Tồn tại khớp nhất tìm thấy trong danh sách đã lưu",
+          properties: {
+            sheet: { type: Type.STRING, description: "Tên sheet của tồn tại: An toàn vệ sinh lao động hoặc TPM, Kaizen" },
+            row: { type: Type.INTEGER, description: "Số dòng (row) trong sheet" },
+            equipment: { type: Type.STRING, description: "Tên thiết bị của tồn tại khớp" },
+            location: { type: Type.STRING, description: "Vị trí của tồn tại khớp" },
+            description: { type: Type.STRING, description: "Nội dung tồn tại khớp" },
+            confidence: { type: Type.STRING, description: "Mức độ khớp: high, medium hoặc low" },
+            matchReason: { type: Type.STRING, description: "Giải thích ngắn lý do AI nhận diện bức ảnh này khớp với tồn tại trên" }
+          }
+        }
+      },
+      required: ["defectTitle", "category", "equipmentName", "severity", "descriptions", "remedySuggestion"]
+    };
 
     const response = await generateWithFallback(ai, {
       contents: [
@@ -145,52 +199,10 @@ QUY TẮC PHÂN LOẠI & ĐÁNH GIÁ:
           thinkingBudget: 0, // Turn off extended thinking for ultra-fast instant response
         },
         temperature: 0.2,
-        maxOutputTokens: 1024,
+        // Đủ chỗ cho phần chữ đọc được + bằng chứng vị trí (và token suy nghĩ của Gemini 2.5)
+        maxOutputTokens: 4096,
         responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            hasDefect: { type: Type.BOOLEAN, description: "True nếu phát hiện lỗi/tồn tại/nguy cơ, False nếu ảnh bình thường/đạt chuẩn" },
-            defectTitle: { type: Type.STRING, description: "Tiêu đề ngắn gọn về tình trạng quan sát được" },
-            category: { type: Type.STRING, description: "Phân loại: safety hoặc iso-kaizen" },
-            categoryLabel: { type: Type.STRING, description: "Tên phân loại tiếng Việt: An toàn vệ sinh lao động hoặc ISO, KAIZEN 5S, TPM" },
-            equipmentName: { type: Type.STRING, description: "Tên thiết bị hoặc kết cấu nhận diện được" },
-            suggestedArea: { type: Type.STRING, description: "Gợi ý khu vực: ialy-hien-huu, ialy-mo-rong, cua-nhan-nuoc, opy-500" },
-            suggestedLocation: { type: Type.STRING, description: "Vị trí lắp đặt chi tiết, ưu tiên khớp chính xác với danh sách chuẩn: Trạm OPY ▼ 550, Phòng Điều Khiển - Trạm OPY ▼ 550, Trạm Phân Phối Ngoài Trời - Trạm OPY ▼ 550, CNN, CNN Ialy Hiện Hữu ▼522, CNN Ialy Mở Rộng ▼522, Đập Tràn ▼ 522, THB11 - Đập tràn ▼522, Tời Nâng - Đập tràn ▼522, NMTĐ IALY MỞ RỘNG, TRẠM CHUYỂN TIẾP ▼ 358,5, CÁC HỆ THỐNG, THIẾT BỊ ▼ 348, Máy biến áp 500kV ▼ 348, Trạm xử lý nước, dầu ▼ 348, Trạm bơm chữa cháy ▼ 348, Trạm Diezel dự phòng ▼ 348, Khu vực hạ lưu NM ▼ 348, GIAN MÁY, Cao trình 288,3-GM, Cao trình 292,7-GM, Cao trình 298,3-GM, Hầm tua bin ▼ 298,3-GM, Cao trình 303,9-GM, Buồng MF H5 ▼ 303,9-GM, Buồng MF H6 ▼ 303,9-GM, Cao trình 309,5-GM, Phòng thiết bị kích từ ▼ 309,5-GM, Phòng máy nén khí bù ▼ 309,5-GM, Phòng thông gió đẩy ▼ 309,5-GM, Phòng TG hút ▼ 316,6, Phòng thiết bị khí nén ▼ 316,6, Cao trình 323,7, Xưởng sửa chữa cơ khí ▼ 323,7, Cao trình 331,4, Phòng Tự dùng ▼ 331,4, Cao trình 339,1, Phòng ĐKTT ▼ 339,1, Cao Trình 309 - GM, Cao Trình 303 - GM, Cao Trình 299,2 - GM, Cao Trình 288,8 - GM, Cao Trình 284,2 - GM, Cao Trình 277 - GM, Gian Biến Áp, Cao Trình 327,8 - GBA, Cao Trình 323,8 - GBA, Cao Trình 340 - GBA, Cao Trình 332 - GBA, Cao Trình 336,5 - GBA, Nhà Khử Khí ▼ 355,7, Các Hệ Thống, Thiết Bị Nhà PK, Trạm Hợp Bộ 6 - nhà PK, Thông Gió Đẩy - nhà PK, Phòng ĐKTT - nhà PK" },
-            severity: { type: Type.STRING, description: "Mức độ rủi ro: Bình thường | Thấp | Trung bình | Cao | Khẩn cấp" },
-            observations: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: "Danh sách 2-4 chi tiết quan sát thấy trong ảnh (điểm lỗi hoặc điểm đạt chuẩn)"
-            },
-            descriptions: {
-              type: Type.OBJECT,
-              properties: {
-                concise: { type: Type.STRING, description: "Gợi ý mô tả súc tích (1 câu)" },
-                standard: { type: Type.STRING, description: "Gợi ý mô tả tiêu chuẩn (đầy đủ hiện tượng và vị trí)" },
-                detailed: { type: Type.STRING, description: "Gợi ý mô tả chi tiết chuyên sâu kèm nhận định nguy cơ" }
-              },
-              required: ["concise", "standard", "detailed"]
-            },
-            remedySuggestion: { type: Type.STRING, description: "Biện pháp xử lý hoặc khuyến nghị kỹ thuật" },
-            processStatus: { type: Type.STRING, description: "Gợi ý cho ô Tình trạng khi hoàn thành (ví dụ: Đã khắc phục hoàn tất)" },
-            processNote: { type: Type.STRING, description: "Gợi ý cho ô Ghi chú xử lý (ví dụ: Đã vệ sinh, thay mới gioăng và siết lại bulông chắc chắn)" },
-            matchedDefect: {
-              type: Type.OBJECT,
-              description: "Tồn tại khớp nhất tìm thấy trong danh sách đã lưu",
-              properties: {
-                sheet: { type: Type.STRING, description: "Tên sheet của tồn tại: An toàn vệ sinh lao động hoặc TPM, Kaizen" },
-                row: { type: Type.INTEGER, description: "Số dòng (row) trong sheet" },
-                equipment: { type: Type.STRING, description: "Tên thiết bị của tồn tại khớp" },
-                location: { type: Type.STRING, description: "Vị trí của tồn tại khớp" },
-                description: { type: Type.STRING, description: "Nội dung tồn tại khớp" },
-                confidence: { type: Type.STRING, description: "Mức độ khớp: high, medium hoặc low" },
-                matchReason: { type: Type.STRING, description: "Giải thích ngắn lý do AI nhận diện bức ảnh này khớp với tồn tại trên" }
-              }
-            }
-          },
-          required: ["defectTitle", "category", "equipmentName", "severity", "descriptions", "remedySuggestion"]
-        }
+        responseSchema: isProcessing ? baseSchema : withLocationSchema(baseSchema)
       }
     });
 
@@ -201,7 +213,7 @@ QUY TẮC PHÂN LOẠI & ĐÁNH GIÁ:
     } else if (rawText.startsWith("```")) {
       rawText = rawText.replace(/^```\s*/i, "").replace(/\s*```$/i, "");
     }
-    const result = JSON.parse(rawText || "{}");
+    const result = normalizeLocationFields(JSON.parse(rawText || "{}"));
     res.json({ success: true, analysis: result });
   } catch (error: any) {
     console.error("Gemini Vision Analysis Error:", error);
