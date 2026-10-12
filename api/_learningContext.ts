@@ -11,6 +11,8 @@
 /** Một ca người dùng đã chỉnh sửa lại kết quả AI (Sổ tay kinh nghiệm cá nhân) */
 export interface LessonPayload {
   formType?: string;
+  /** Tên thiết bị trong ảnh của ca đó */
+  equipment?: string;
   corrections?: Array<{ field?: string; aiSaid?: string; userFixed?: string }>;
 }
 
@@ -67,7 +69,8 @@ export function buildLessonsContext(lessons: LessonPayload[]): string {
         .slice(0, 6)
         .map((c) => `   - ${c.field}: AI từng ghi "${c.aiSaid}" → Chuẩn phải là "${c.userFixed}"`)
         .join("\n");
-      return `[Bài học #${idx + 1}]\n${detail}`;
+      const equipment = String(l?.equipment || "").trim();
+      return `[Bài học #${idx + 1}]${equipment ? ` Thiết bị trong ảnh: "${equipment}"` : ""}\n${detail}`;
     })
     .filter(Boolean)
     .join("\n");

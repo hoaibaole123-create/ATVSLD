@@ -75,6 +75,10 @@ import {
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { AiVisionDefectAnalyzer } from './src/components/AiVisionDefectAnalyzer';
+import { AREA_LOCATIONS_MAP } from './src/lib/locationCatalog';
+import { recordLesson } from './src/lib/aiKnowledgeBase';
+import { refreshSheetExamples } from './src/lib/sheetKnowledge';
+import { refreshLocationMemoryFromSheet, rememberLocation, WEIGHT_SUBMIT } from './src/lib/locationMemory';
 
 // --- Consolidated Types ---
 export enum DefectStatus {
@@ -105,89 +109,8 @@ const CATEGORIES = [
   'TPM, Kaizen'
 ];
 
-export const AREA_LOCATIONS_MAP: Record<string, { name: string; locations: string[] }> = {
-  'opy-500': {
-    name: 'OPY 500kV',
-    locations: [
-      'Trạm OPY ▼ 550',
-      'Phòng Điều Khiển - Trạm OPY ▼ 550',
-      'Trạm Phân Phối Ngoài Trời - Trạm OPY ▼ 550'
-    ]
-  },
-  'cua-nhan-nuoc': {
-    name: 'Cửa nhận nước & Đập tràn',
-    locations: [
-      'CNN Ialy Hiện Hữu ▼522',
-      'CNN Ialy Mở Rộng ▼522',
-      'CNN',
-      'Đập Tràn ▼ 522',
-      'THB11 - Đập tràn ▼522',
-      'Tời Nâng - Đập tràn ▼522'
-    ]
-  },
-  'ialy-mo-rong': {
-    name: 'Ialy mở rộng',
-    locations: [
-      'NMTĐ IALY MỞ RỘNG',
-      'TRẠM CHUYỂN TIẾP ▼ 358,5',
-      'CÁC HỆ THỐNG, THIẾT BỊ ▼ 348',
-      'Máy biến áp 500kV ▼ 348',
-      'Trạm xử lý nước, dầu ▼ 348',
-      'Trạm bơm chữa cháy ▼ 348',
-      'Trạm Diezel dự phòng ▼ 348',
-      'Khu vực hạ lưu NM ▼ 348',
-      'Cao trình 339,1',
-      'Phòng ĐKTT ▼ 339,1',
-      'Cao trình 331,4',
-      'Phòng Tự dùng ▼ 331,4',
-      'Cao trình 323,7',
-      'Xưởng sửa chữa cơ khí ▼ 323,7',
-      'Phòng TG hút ▼ 316,6',
-      'Phòng thiết bị khí nén ▼ 316,6',
-      'Cao trình 309,5-GM',
-      'Phòng thiết bị kích từ ▼ 309,5-GM',
-      'Phòng máy nén khí bù ▼ 309,5-GM',
-      'Phòng thông gió đẩy ▼ 309,5-GM',
-      'Cao trình 303,9-GM',
-      'Buồng MF H5 ▼ 303,9-GM',
-      'Buồng MF H6 ▼ 303,9-GM',
-      'Cao trình 298,3-GM',
-      'Hầm tua bin ▼ 298,3-GM',
-      'Cao trình 292,7-GM',
-      'Cao trình 288,3-GM',
-      'GIAN MÁY'
-    ]
-  },
-  'ialy-hien-huu': {
-    name: 'Ialy hiện hữu',
-    locations: [
-      'NMTĐ IALY',
-      'Nhà Khử Khí ▼ 355,7',
-      'Phòng máy phát Diezel ▼ 355,7 - nhà PK',
-      'Thông Gió Hút ▼352',
-      'Trạm Chuyển Tiếp ▼ 352',
-      'Các Hệ Thống, Thiết Bị Nhà PK',
-      'Trạm Hợp Bộ 6 - nhà PK',
-      'Thông Gió Đẩy - nhà PK',
-      'Phòng ĐKTT - nhà PK',
-      'Gian Biến Áp',
-      'Cao Trình 340 - GBA',
-      'Cao Trình 336,5 - GBA',
-      'Cao Trình 332 - GBA',
-      'Cao Trình 327,8 - GBA',
-      'Cao Trình 323,8 - GBA',
-      'Xưởng Sửa Chữa GBA',
-      'Gian Máy',
-      'Cao Trình 309 - GM',
-      'Cao Trình 303 - GM',
-      'Xưởng Sửa Chữa ▼ 303 - GM',
-      'Cao Trình 299,2 - GM',
-      'Cao Trình 288,8 - GM',
-      'Cao Trình 284,2 - GM',
-      'Cao Trình 277 - GM'
-    ]
-  }
-};
+// Danh mục vị trí / cao trình nằm ở src/lib/locationCatalog.ts (dùng chung với AI Vision)
+export { AREA_LOCATIONS_MAP };
 
 export const IALY_HIEN_HUU_LOCATIONS = AREA_LOCATIONS_MAP['ialy-hien-huu'].locations;
 
@@ -1323,6 +1246,15 @@ const DefectForm: React.FC = () => {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   
   const [locationSearch, setLocationSearch] = useState('');
+  // Gợi ý AI đã áp dụng vào biểu mẫu, dùng để ghi bài học khi người dùng sửa lại trước khi gửi
+  const aiSuggestionRef = useRef<Record<string, string> | null>(null);
+  // Mã thiết bị AI đọc được trong ảnh, dùng để ghi nhớ vị trí khi gửi báo cáo
+  const aiEquipmentCodesRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    refreshSheetExamples(SHEET_ID, CATEGORIES);
+    refreshLocationMemoryFromSheet(SHEET_ID, CATEGORIES);
+  }, []);
 
   const [formData, setFormData] = useState({
     reporterName: '',
@@ -1391,6 +1323,14 @@ const DefectForm: React.FC = () => {
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify(payload)
       });
+
+      if (aiSuggestionRef.current) {
+        recordLesson({ formType: 'report', aiSuggestion: aiSuggestionRef.current, userCorrection: formData });
+        aiSuggestionRef.current = null;
+      }
+      // Gửi báo cáo = xác nhận cuối cùng của vị trí cho các mã thiết bị trong ảnh
+      rememberLocation(aiEquipmentCodesRef.current, formData.location, WEIGHT_SUBMIT);
+      aiEquipmentCodesRef.current = [];
       
       setIsSubmitting(false);
       setShowSuccess(true);
@@ -1695,13 +1635,24 @@ const DefectForm: React.FC = () => {
         onClose={() => setShowAiModal(false)}
         images={images}
         formType="report"
+        areaHint={formData.area}
         onApplyAllReport={(data) => {
+          // Bài học so với vị trí AI tự xác định ban đầu, kể cả khi người dùng đã chọn lại trong khung AI
+          aiSuggestionRef.current = {
+            category: data.category || '',
+            area: data.area || '',
+            equipmentName: data.equipmentName || '',
+            location: data.aiLocation || '',
+            description: data.description || '',
+          };
+          aiEquipmentCodesRef.current = data.equipmentCodes || [];
+          if (data.area && data.area !== formData.area) setLocationSearch('');
           setFormData(prev => ({
             ...prev,
             category: data.category || prev.category,
             area: data.area || prev.area,
             equipmentName: data.equipmentName || prev.equipmentName,
-            // Không gợi ý/điền vào ô địa điểm (để người dùng tự chọn/nhập địa điểm)
+            location: data.location || prev.location,
             description: data.description || prev.description,
           }));
         }}
